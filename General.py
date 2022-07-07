@@ -155,6 +155,3 @@ def MakeGraph(xs, ys, labels, title, xlabel, ylabel, size, filename):
     #
     filepath = MakeFilePath("Graphs", filename, "png")
     plt.saveifg(filepath)
-
-
-#########################################################################################################
