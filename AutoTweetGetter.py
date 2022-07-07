@@ -7,6 +7,7 @@ from hashlib import scrypt
 from multiprocessing.spawn import old_main_modules
 from reprlib import recursive_repr
 import shutil
+from tkinter import BooleanVar
 from tracemalloc import start
 from types import NoneType
 from selenium import webdriver
@@ -26,6 +27,10 @@ import matplotlib.dates as mdates
 #%matplotlib inline
 import japanize_matplotlib
 from operator import itemgetter
+
+from collections import defaultdict
+
+from janome.tokenizer import Tokenizer
 
 from bs4 import BeautifulSoup
 import time
@@ -47,6 +52,9 @@ import glob
 import random
 import atexit
 import copy
+import csv
+import gensim
+import MeCab
 
 import General as g
 
@@ -79,13 +87,139 @@ class FTwitterLoginData:
     pw: str
 
 # === クラス ===
+
+# 自然言語処理
+class NLProcessing:
+    tokenizer = Tokenizer()
+
+    def __init__(self):
+        pass
+
+    # ネガポジ辞書データの取得
+    def GetNPDict(self):
+        # すでにある場合はそれを取得する
+        np_dic = g.LoadData("damp", "np_dic")
+        if np_dic:
+            return np_dic
+
+        # ない場合は作成して保存する
+        np_dic = {}
+        #
+        fp = open("./../pn.csv", "rt", encoding="utf-8")
+        #
+        reader = csv.reader(fp, delimiter='\t')
+        #
+        for i, row in enumerate(reader):
+            name = row[0]
+            result = row[1]
+            #print(name)
+            #print(result)
+            np_dic[name] = result
+            #if i % 1000 == 0: print(i)
+        #
+        g.SaveData(np_dic, "damp", "np_dic")
+        print("ok")
+
+        return np_dic
+
+    # 文章に対してネガポジ分析を行う
+    def GetEasyNPData(self, input_str):
+        pos_count = 0
+        neg_count = 0
+        word_count = 0
+        tokens = self.tokenizer.tokenize(input_str)
+
+        np_dic = self.GetNPDict()
+        for token in tokens:
+            base_form = token.base_form # 原型 / 基本形
+            # ネガポジ辞書に存在するか確認して対応する方を１増やす
+            if base_form in np_dic:
+                # 単語を辞書のキーとして、そのバリューがpかnか確認する
+                if np_dic[base_form] == "p":
+                    pos_coutn += 1
+                    # どんな言葉がポジ版tネイされているか確認用（あとでコメントアウト）
+                    print("POS:" + base_form)
+                if np_dic[base_form] == "n":
+                    neg_count += 1
+                    print("NEG:" + base_form)
+            # 存在しようがしまいが、単語数を１増やす
+            word_count += 1
+
+        return pos_count, neg_count, word_count
+
+    # chiVeによる単語解析
+    def GetWordView_chiVe(self, word):
+        # モデルの読み込み
+        MODEL_PATH = r"C:\Users\hikac\Desktop\LangModels\chive-1.2-mc5_gensim\chive-1.2-mc5_gensim\chive-1.2-mc5.kv"
+        wv = gensim.models.KeyedVectors.load(MODEL_PATH)
+        
+        # 類似度上位10件を取得
+        match = wv.most_similar(word, topn=10)
+        
+        # 見やすい形式で表示
+        print(match)
+
+    # fastTextによる単語解析
+    def GetWordView_fastText(self, word):
+        # モデルの読み込み
+        MODEL_PATH = r"C:\Users\hikac\Desktop\LangModels\cc.ja.300.vec"
+        wv = gensim.models.KeyedVectors.load_word2vec_format(MODEL_PATH, binary=False)
+        
+        # 類似度上位10件を取得
+        match = wv.most_similar(word, topn=10)
+        
+        # 見やすい形式で表示
+        print(match)
+
+    # 形態素解析１
+    def MakeMorphologicalAnalysis(self, txt):
+        option0 = ''
+        option1 = '-Ochasen'
+        option2 = '-Owakati'
+        tagger = MeCab.Tagger()
+        # 簡単な形態素解析
+        parsed_txt = tagger.parse(txt)
+
+        #
+        ress = []
+        elements = parsed_txt.split("\n")[:-2]
+        for element in elements:
+            #print(element)
+            parts = element.split(",")
+            surface_pos = parts[0].split("\t")
+            try:
+                surface = surface_pos[0]
+                pos = surface_pos[1]
+            except:
+                pass
+            pos1 = parts[1]
+            base = parts[-3]
+            #
+            ress.append(dict(表層形=surface, 基本形=base, 品詞=pos, 品詞1=pos1))
+
+        #print(ress)
+        # 要素の出現頻度を計算する
+        word_freq = defaultdict(int)
+
+        #
+        for res in ress:
+            #print(res)
+            if res["品詞"] == '名詞':
+                word_freq[res['基本形']] += 1
+
+        #print(word_freq)
+        
+        sort_words = sorted(word_freq.items(), key=lambda x:x[1], reverse=True)
+        for sw in sort_words:
+            print(sw)
+        
+    
+
+
 # Seleniumなどを用いたスクレイピングのクラス
 class ScraypinIn:
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36'}
     driver = NULL
-    oldProcessTime = 0
-
-    basefolder = "C:\\Users\\hikac\\Desktop\\datas\\"
 
     counttimes = {}
 
@@ -115,88 +249,10 @@ class ScraypinIn:
         #    
         self.counttimes[CountName] = nowtime
 
-
-    # 適切なファイルパスとファイル名を作成する
-    def MakeFilePath(self, filepath, filename, fileEx):
-        filepath = self.basefolder + filepath
-        # そこまでのフォルダーの作成を行う
-        try:
-            os.makedirs(filepath)
-        except:
-            pass
-        return filepath + "/" + filename + "." + fileEx
-
-    # 渡したデータをダンプ形式で保存する
-    def SaveArticle(self, savedata, filename):
-        sys.setrecursionlimit(100000)#エラー回避
-        filepath = self.MakeFilePath("temps", "temp_" + filename, "txt")
-        if False:
-            # こっちの場合は特定の部分でエラーが出る、理由は不明
-            joblib.dump(savedata, filename, compress=3)
-        else:
-            with open(filepath, "wb") as f:
-                pickle.dump(savedata, f)
-
-    def LoadArticle(self, filename):
-        filepath = self.MakeFilePath("temps", "temp_" + filename, "txt")
-        with open(filepath, "rb") as f:
-            return pickle.load(f)
-
-    # URLを渡すことによってそのイメージを保存する
-    # ユニーク名前を付けるためにグローバルなカウントを使用する
-    def SaveImage(self, url, file_path, file_name):
-        f = io.BytesIO(request.urlopen(url).read())
-        img = Image.open(f)
-
-        #
-        filepath = self.MakeFilePath(file_path, file_name, "jpg")
-        img.save(filepath)
-        img.close()
-
     # ブラウザを閉じて終了する
     def Quit(self):
         time.sleep(3)
         self.driver.quit()
-
-    # 保存したいデータを渡すことによって書き出しを行う
-    def SaveData(self, savedata, file_path, file_name):
-        filepath = self.MakeFilePath(file_path, file_name, "json")
-        # 内部にdictが存在しているかが重要
-        typecheck = savedata
-        while True:
-            if isinstance(typecheck, list):
-                typecheck = typecheck[0]
-            else:
-                break
-        # jsonとして保存
-        if isinstance(typecheck, dict):
-            try:
-                df = pd.DataFrame(savedata, index=["i",])
-            except:
-                df = pd.DataFrame(savedata)
-            df.to_json(filepath, orient="records", force_ascii=False)
-        else:
-            filepath = filepath.replace(".json", "")
-            np.save(filepath, savedata)
-            
-        
-        return filepath
-
-    # 単純にデータを読み込む
-    def LoadData(self, file_path, file_name):
-        filepath = self.MakeFilePath(file_path, file_name, "json")
-        
-        try:
-            jo = open(filepath, "r", encoding="utf-8")
-            return json.load(jo)
-        except:
-            try:
-                filepath = filepath.replace("json", "npy")
-                return np.load(filepath)
-            except:
-                pass
-        #
-        return None
 
     # Twitterから取得される日付文字列を最適化する
     def getFixDateTime(self, date):
@@ -235,19 +291,6 @@ class ScraypinIn:
         #print(d1 + "_" + d2 + "_" + d3 + "_" + t)
         date = d1 + "_" + d2 + "_" + d3 + "_" + t
         return date
-
-    # 指定したDateTimeデータから年、月、日を得る
-    def GetDateTime(self, dt):
-        return dt.year, dt.month, dt.day
-
-    # 実行するたびに以前実行してからの経過時間を書き出す
-    def drawProcessingTime(self, processName):
-        processTime = time.process_time()
-        if self.oldProcessTime == 0:
-            self.oldProcessTime = processTime
-        else:
-            print("ProcessTime: " + processName + " : " +  str(processTime - self.oldProcessTime))
-            self.oldProcessTime = processTime
 
     # 指定した名前で検索してすべての配信情報を得る
     def SearchUserSite(self, username):
@@ -334,6 +377,8 @@ class ScrayTwitter(ScraypinIn):
     loginData_Type04 = FTwitterLoginData("punnchipunn", "KAWAZOE4367")
     loginData_Type05 = FTwitterLoginData("tandemotarou", "KAWAZOE4367")
     
+    #
+    debugnum = 0
 
     
     def __init__(self, myid = "Dummy___Plug"):
@@ -509,7 +554,7 @@ class ScrayTwitter(ScraypinIn):
         tws = []
         nghashs = []
         # 過去のNGHashを呼び出す
-        loadhashs = self.LoadData("damps", "damp_nghashs")
+        loadhashs = g.LoadData("damps", "damp_nghashs")
         if loadhashs:
             for has in loadhashs:
                 nghashs.append(has["0"])
@@ -551,7 +596,7 @@ class ScrayTwitter(ScraypinIn):
         # すでに行ったハッシュは保存しておく
         #print("NG:")
         #print(nghashs)
-        self.SaveData(nghashs, "damps", "damp_nghashs")
+        g.SaveData(nghashs, "damps", "damp_nghashs")
 
         return tws
 
@@ -836,51 +881,25 @@ class ScrayTwitter(ScraypinIn):
 
         return t
 
-    # TwitterDataへのPathを渡すことによってそれに含まれるTweetを純粋文章として受け取る
-    def GetTwitterTexts(self, tweetdatepath):
-        texts = []
-
-        datas = self.getTwitterDatas(tweetdatepath)
-
-        for d in datas:
-            texts.append(d["tweet"])
-        
-        return texts
-
-    # ツイッターデータを文字データのみ取り出して書き出す
-    # 主にAIのべりすと用に使用する
-    def PrintTwitter(self, filename, filepath):
-        tweets = self.GetTwitterTexts(filepath)
-
-        if len(tweets) > 0:
-            text = ""
-            for t in tweets:
-                #t = self.getFixText(t)
-                if len(t) > 1:
-                    text += t
-                    text += "\n"
-            #print(text)
-
-            f = open(f"AIのべりすと/{filename}_twitter.txt", 'w', encoding='UTF-8')
-            f.write(text)
-            f.close()
-
-
     # 受け取った文字列から感情を読み取る処理を行ってその結果を書き出す
     # 呼び出す際にお金が発生するので気をつけること
     def CreateSentiment(self, targetID):
         key = "AIzaSyA-ALaHEs7lFOv9nLF936-qzgIRbI21YyM"
 
-        dumpname = f"{targetID}__TwitterData"
-        filename = f"datas\{targetID}\{targetID}_TwitterData.json"
-        tweets = self.GetTwitterTexts(filename)
+        # ツイートデータの取得
+        tweets = []
+        datas = g.LoadData("Users\\" + targetID, "Tweet")
+        for d in datas:
+            tweets.append(d["tweet"])
+        
 
-        count = 0
-        #tweets = ["KAI-YOUさんのロングインタビューvol.3が公開されました！vol.1、2も好評だったそうで、是非最初から通して読んでいただけると嬉しいです(*´꒳`*)"]
-        print(targetID)
-        #print(len(tweets))
+        # 指定したTargetIDのTweetデータを読み込んで、
         if len(tweets) > 0:
             text = ""
+            # 送った回数が料金に直結する、複数のツイート内容を１つの文章のようにまとめて送ることによって回数を節約する
+            # Googleの処理においてここで文が区切らているという解釈がされる文字などがある、それを重視して意識的に文を書き換えている(とても重要)
+            # これを行わないとツイートごとの感情分析がもらえない
+            count = 0
             for t in tweets:
                 t = self.GetFixText(t)
                 if len(t) > 1:
@@ -906,63 +925,38 @@ class ScrayTwitter(ScraypinIn):
             print(dsize)
             print(sys.getsizeof(text))
 
+            # Google側にデータを送って結果をもらう
+            # 料金が発生するので注意が必要である
+            url = f"https://language.googleapis.com/v1beta2/documents:analyzeSentiment?key={key}"
             header = {"Content-Type": "application/json"}
-            body = {}
-            url = ""
-            if True:
-                url = f"https://language.googleapis.com/v1beta2/documents:analyzeSentiment?key={key}"
-
-                body = {
-                    "document": {
-                        "type": "PLAIN_TEXT",
-                        "language": "JA",
-                        "content": text
-                    }
+            body = {
+                "document": {
+                    "type": "PLAIN_TEXT",
+                    "language": "JA",
+                    "content": text
                 }
-            else:
-                # 多くの情報を得る処理だが、コストの割に必要ない情報が多い、感情分析のみでいい
-                url = f"https://language.googleapis.com/v1beta2/documents:annotateText?key={key}"
-                body = {
-                    "document": {
-                        "type": "PLAIN_TEXT",
-                        "language": "JA",
-                        "content": text
-                    },
-                    "features": {
-                        "extractSyntax": True,
-                        "extractEntities": True,
-                        "extractDocumentSentiment": True,
-                        "extractEntitySentiment": True,
-                        "classifyText": False
-                    }
-                }
-
+            }
             res = requests.post(url, headers=header, json=body)
             res = res.json()
 
-            #print(res)
-
-            self.SaveArticle(res, dumpname)
+            g.SaveArticle(res, f"{targetID}_SentimentData")
 
     # 指定したツイートの内容の感情データを描画する
     # 事前にcreateSentimentを呼び出さないと使えない
     def ViewSentiment(self, targetID):
-        dumpname = f"{targetID}__TwitterData"
-        filename = f"datas//Users//{targetID}//{targetID}_Twitter.json"
-        
-        tw_res = self.getTwitterDatas(filename)
-        sen_res = self.LoadArticle(dumpname)
-
-        #print(str(len(tw_res)) + ":" + str(len(sen_res["sentences"])))
+        dumpname = f"{targetID}_SentimentData"
+        tw_res = g.LoadData("Users//" + targetID, "Tweet")
+        sen_res = g.LoadArticle(dumpname)
         
         g_datas = []
         sens = sen_res["sentences"]
         print(str(len(tw_res)) + ":" + str(len(sens)))
-        #print(tw_res)
+        
         hoge = {}
+        # 感情分析データから必要なデータを取得して関連したツイートの日付などのデータと合わせて１つのデータとする
         for i,sen in enumerate(sens):
             text = sen["text"]["content"]
-            
+
             # 文字が正しく処理されているかチェック
             if debug:
                 if len(sens) > (i+1):
@@ -983,17 +977,15 @@ class ScrayTwitter(ScraypinIn):
                     print(tx)
                     tx = self.GetFixText(tx)
                     print(tx)
-            #
+            # score, mag, datetime等のデータを纏める
             score = sen["sentiment"]["score"]
             mag = sen["sentiment"]["magnitude"]
-            #print(sen)
             datetime = tw_res[i]["datetime"]
             datetime = datetime.split("_")[:3]
-            #print(datetime)
             truedatetime = int(datetime[0]) * 365 + int(datetime[1]) * 30 + int(datetime[2])
             # 2022-02-10の形式にする
             datetime = dtime(int(datetime[0]), int(datetime[1]), int(datetime[2]))
-            #print(truedatetime)
+            # すべてのデータをまとめる
             g = {}
             g["text"] = text
             g["score"] = score
@@ -1231,7 +1223,7 @@ class ScrayTwitter(ScraypinIn):
 
         file_path = "Users/" + targetID
         file_name = "Following"
-        ids = self.LoadData(file_path, file_name)
+        ids = g.LoadData(file_path, file_name)
         if not isinstance(ids, NoneType):
             return ids
 
@@ -1292,7 +1284,7 @@ class ScrayTwitter(ScraypinIn):
         # 今話題のワードを取得する
         nghashs = []
         # 過去にすでにリツイートを行ったワードは行わない
-        loadhashs = self.LoadData("damps", self.myID + "_damp_nghashs")
+        loadhashs = g.LoadData("damps", self.myID + "_damp_nghashs")
         #print(loadhashs)
         if loadhashs:
             for has in loadhashs:
@@ -1342,7 +1334,7 @@ class ScrayTwitter(ScraypinIn):
                     self.DoTweet_ReTweet(mostminacount, mostmintweetid)
 
         # そのアカウントですでに取り上げたワードはもう行わない
-        self.SaveData(nghashs, "damps", self.myID + "_damp_nghashs")
+        g.SaveData(nghashs, "damps", self.myID + "_damp_nghashs")
 
     # 対象のアカウントの直近のツイートの中で適当なものをいいねする
     def DoLikeTweetForAcount(self, targetAcount):
@@ -1432,7 +1424,7 @@ class ScrayTwitter(ScraypinIn):
         # すでに存在している場合は処理しない
         file_path = "Users/" + targetID
         file_name = "TwitterHome"
-        dummy = self.LoadData(file_path, file_name)
+        dummy = g.LoadData(file_path, file_name)
         if dummy:
             return dummy
 
@@ -1447,13 +1439,13 @@ class ScrayTwitter(ScraypinIn):
             try:
                 elem_banner = driver.find_element(By.XPATH, "//img[contains(@src, 'profile_banners')]")
                 file_name = targetID + "_Banner"
-                self.SaveImage(elem_banner.get_attribute("src"), file_path, file_name)
+                g.SaveImage(elem_banner.get_attribute("src"), file_path, file_name)
             except:
                 pass
             try:
                 elem_profile = driver.find_element(By.XPATH, "//img[@alt='プロフィール画像を開きます'][contains(@src, 'profile_images')]")
                 file_name = targetID + "_Icon"
-                self.SaveImage(elem_profile.get_attribute("src"), file_path, file_name)
+                g.SaveImage(elem_profile.get_attribute("src"), file_path, file_name)
             except:
                 pass
             elem_username = driver.find_element(By.XPATH, "//div[@data-testid='UserName']")
@@ -1491,7 +1483,7 @@ class ScrayTwitter(ScraypinIn):
             #print(homeData)
             #
             file_name = "TwitterHome"
-            self.SaveData(homeData, file_path, file_name)
+            g.SaveData(homeData, file_path, file_name)
             
             savelist = copy.deepcopy(homeData)
 
@@ -1509,24 +1501,25 @@ class ScrayTwitter(ScraypinIn):
             # 通常のエラー処理
             print("HomeError: " + targetID)
             file_name = "TwitterHome"
-            self.SaveData("empty", file_path, file_name)
+            g.SaveData("empty", file_path, file_name)
             pass
         self.Reset()
 
     # キーワードを指定してそれに関するツイートを取得する
     # wordにIDを指定して、foracountをTrueとすれば、そのIDの発言を取得できる
     # baseFileNameが存在しない場合はファイルの作成は行わない
-    def GetTweet(self, word, backday, backcount, offsetday, foracount = True, notreply = True, notlink = True, nothash = True, baseFileName = None, ngwords = None):
+    def GetTweet(self, word, backday, backcount, offsetday, foracount = True, notreply = True, notlink = True, nothash = True, baseFileName = None, ngwords = None, Overlayed = False):
         driver = self.driver
         #atexit.register(self.Reset)
 
         # すでに存在している場合は処理しない
-        if baseFileName:
-            file_path = "Users/" + baseFileName
-            file_name = "Tweet"
-            tws = self.LoadData(file_path, file_name)
-            if tws:
-                return tws
+        if not Overlayed:
+            if baseFileName:
+                file_path = "Users/" + baseFileName
+                file_name = "Tweet"
+                tws = g.LoadData(file_path, file_name)
+                if tws:
+                    return tws
 
 
         if ngwords:
@@ -1535,12 +1528,12 @@ class ScrayTwitter(ScraypinIn):
             ngwords = self.globalngwords
 
         UntilTime = dtime.datetime.now()
-        until_y, until_m, until_d = self.GetDateTime(UntilTime)
+        until_y, until_m, until_d = g.GetDateTime(UntilTime)
         # 指定した日にち前
         if offsetday > 0:
             #since_y,since_m,since_d = self.getDateTime(since_y, since_m, since_d, offsetmonth)
             UntilTime = UntilTime - dtime.timedelta(days=offsetday)
-            until_y, until_m, until_d = self.GetDateTime(UntilTime)
+            until_y, until_m, until_d = g.GetDateTime(UntilTime)
             
         # 指定した月遡ってデータを得る
         # １月単位でデータを得ることによって読み込み速度を上げる
@@ -1548,8 +1541,8 @@ class ScrayTwitter(ScraypinIn):
         for i in range(backcount):
             UntilTime = SinceTime
             SinceTime = UntilTime - dtime.timedelta(days=backday)
-            since_y, since_m, since_d = self.GetDateTime(SinceTime)
-            until_y, until_m, until_d = self.GetDateTime(UntilTime)
+            since_y, since_m, since_d = g.GetDateTime(SinceTime)
+            until_y, until_m, until_d = g.GetDateTime(UntilTime)
     
             since = str(since_y) + "-" + str(since_m).zfill(2) + "-" + str(since_d).zfill(2)
             until = str(until_y) + "-" + str(until_m).zfill(2) + "-" + str(until_d).zfill(2)
@@ -1595,9 +1588,11 @@ class ScrayTwitter(ScraypinIn):
         
             # articleタグが読み込まれるまで待機（最大15秒）
             try:
+                self.debugnum = "A"
                 WebDriverWait(driver, 3.0).until(EC.visibility_of_element_located((By.TAG_NAME, 'article')))
                 listnum = len(self.tweet_list)
                 self.getTweetData(baseFileName)
+                self.debugnum = "B"
                 # 最大取得ツイート数に達していた場合は抜ける
                 if self.maxgettweetcount != 0 and self.maxgettweetcount < len(self.tweet_list):
                     break
@@ -1605,15 +1600,20 @@ class ScrayTwitter(ScraypinIn):
                 newlistnum = len(self.tweet_list) - listnum
                 if newlistnum == 0:
                     backday *= 3
+                self.debugnum = "C"
                 backday = int((100 / newlistnum) * backday)
-                print("BACKDAY:" + str(backday))
+                self.debugnum = "D"
+                #print("BACKDAY:" + str(backday))
 
             except:
+                print("ERROR:" + self.debugnum)
                 pass
 
         if len(self.tweet_list) > 0:
             if baseFileName:
-                self.SaveData(self.tweet_list, file_path, file_name)
+                file_path = "Users/" + baseFileName
+                file_name = "Tweet"
+                g.SaveData(self.tweet_list, file_path, file_name)
 
             savelist = copy.deepcopy(self.tweet_list)
             
@@ -1625,18 +1625,20 @@ class ScrayTwitter(ScraypinIn):
 
     # すでに開かれた対象者のTwitterからスクロールしながらデータを取得する
     def getTweetData(self, baseFileName):
-        driver = self.driver
         # 指定回数スクロール
         # スクロールして情報を更新しながらそれらの情報を収集していく
         #print(self.tweet_list)
         for i in range(self.max_scroll_count):
             #
+            self.debugnum = "AA"
             self.getTweetData_Page(baseFileName)
+            self.debugnum = "AB"
             if self.maxgettweetcount != 0 and self.maxgettweetcount < len(self.tweet_list):
                 break
             # スクロール＝ページ移動
             if self.scroll_to_elem(self.driver):
                 break
+            self.debugnum = "AC"
             
             # 待つ（サイトに負荷を与えないと同時にコンテンツの読み込み待ち）
             time.sleep(self.scroll_wait_time)
@@ -1645,21 +1647,32 @@ class ScrayTwitter(ScraypinIn):
         driver = self.driver
         elems_article = driver.find_elements(By.TAG_NAME, 'article')
 
-        #print("A")
+        self.debugnum = "BA"
 
-        prevelem = NULL
         for elem_article in elems_article:
-            if elem_article:
-                #print("B")
+            try:
                 elems_a = elem_article.find_elements(By.TAG_NAME, "a")
+            except:
+                print("Hoge")
+                print(elem_article)
+            if elem_article:
+                self.debugnum = "START"
+                try:
+                    elems_a = elem_article.find_elements(By.TAG_NAME, "a")
+                except:
+                    print("Piyo")
+                    print(elem_article)
+                self.debugnum = "BBA"
                 # ツイートへのURLによってすでにそれが読み込まれているかをチェックする
                 id = elems_a[3].get_attribute("href")
+                self.debugnum = "BBB"
                 id = id.split("status/")[-1]
+                self.debugnum = "BBC"
                 if id in self.id_list:
                     #print("重複")
                     pass
                 else:
-                    #print("C")
+                    self.debugnum = "BB"
                     self.id_list.append(id)
                     tweet = {}
                     elems_tw = elem_article.find_element(By.XPATH, ".//div[@lang=\"ja\"]")
@@ -1673,23 +1686,23 @@ class ScrayTwitter(ScraypinIn):
                         for i,e in enumerate(elems_a):
                             print(str(i) + ":" + e.text)
                     ttime = elems_a[3].find_element(By.TAG_NAME, "time").get_attribute("datetime")
-                    #print("D")
+                    self.debugnum = "BC"
                     tweet["datetime"] = ttime
-                    #print("E")
+                    self.debugnum = "BD"
                     tweet["tweet"] = elems_tw.text
-                    #print("F")
+                    self.debugnum = "BE"
                     try:
                         tweet["likecount"] = elem_article.find_element(By.XPATH, ".//div[contains(@aria-label, 'いいねする')]").text
                     except:
                         tweet["likecount"] = elem_article.find_element(By.XPATH, ".//div[contains(@aria-label, 'いいねしました')]").text
-                    #print("G")
+                    self.debugnum = "BF"
                     try:
                         tweet["retweetcount"] = elem_article.find_element(By.XPATH, ".//div[contains(@aria-label, 'リツイートする')]").text
                     except:
                         tweet["retweetcount"] = elem_article.find_element(By.XPATH, ".//div[contains(@aria-label, 'リツイートしました')]").text
-                    #print("H")
+                    self.debugnum = "BG"
                     tweet["replycount"] = elem_article.find_element(By.XPATH, ".//div[contains(@aria-label, '返信する')]").text
-                    #print("I")
+                    self.debugnum = "BH"
 
                     # イメージの保存
                     if baseFileName:
@@ -1707,12 +1720,12 @@ class ScrayTwitter(ScraypinIn):
                                 photourl = elem_img.get_attribute("src")
                                 if "media" in photourl:
                                     imgcount += 1
-                                    self.SaveImage(photourl, file_path, file_name + "_" + str(imgcount))
+                                    g.SaveImage(photourl, file_path, file_name + "_" + str(imgcount))
                         except:
                             print("ERROR: IMG " + tweet["name"] + " : " + tweet["id"])
                     
 
-                    #print(tweet)
+                    self.debugnum = "BI"
                     self.tweet_list.append(tweet)
 
 
@@ -1728,7 +1741,7 @@ class ScrayTwitter(ScraypinIn):
         #
         file_path = "Users/" + targetID
         file_name = "TwitterLike"
-        self.SaveData(self.tweet_list, file_path, file_name)
+        g.SaveData(self.tweet_list, file_path, file_name)
         self.Reset()
 
     # 
@@ -1898,7 +1911,7 @@ class ScrayTwitter(ScraypinIn):
                         date = self.getFixDateTime(s)
                         file_name = targetID + "_" + "RT_" + t_id + "_" + date + "_" + tweet_id + "_" + str(num)
                         imgurl = img.get_attribute("src")
-                        self.SaveImage(imgurl, file_path, file_name)
+                        g.SaveImage(imgurl, file_path, file_name)
                 
             except:
                 pass
@@ -1919,7 +1932,7 @@ class ScrayTwitter(ScraypinIn):
         file_path = "Users/" + targetID
         file_name = "TwietterReTweet"
 
-        self.SaveData(retweetdata, file_path, file_name)
+        g.SaveData(retweetdata, file_path, file_name)
         self.Reset()
 
     # ツイート内容の中にリンクが有る場合はうまくそれを取得しないといけない
@@ -1959,78 +1972,15 @@ class ScrayTwitter(ScraypinIn):
 
 
 if __name__ == '__main__':
-    #ids = ["hatsumememe"]
-    #for id in ids:
-    #    GT = ScrayTwitter(id)
-    #    GT.AllGetTwitters()
-    #GT = ScrayTwitter("lepumoshion", "enako_cos")
-    #GT.DoFollow()
-    #GT.DoTweet_Like("1531127775360598016")
-    #GT.Quit()
-    #SP = ScraypinIn()
-    #SP.SearchUserSite("えなこ")
-    """
-    #sks = [ "Apex", "スパイファミリー","クラナド","かぐや様","五等分の花嫁","明日ちゃんのセーラー服","進撃の巨人","ジョジョ", "CloverWorks", "バキ", "着せ恋","王様ランキング", "鬼滅の刃",
-    #        "Eldenring", "バイオハザード", "ストリートファイター", "Shadowverse", "VR", "UnrealEngine", "ビートセイバー", "Oculus", "東方", "ミク"]
-    sks = ["Apex"]
-    GT = ScrayTwitter(None, None)
-    for sk in sks:
-        GT.printTwitter(sk, f"C:\\Users\\hikac\\Documents\\VSCode\\Pythons\\TwitterProject\\datas\\Tweets\\{sk}_TwitterData.json")
-    GT.Quit()
-    """
-    """
-    GT = ScrayTwitter(None, None)
-    words = [re_num1, re_num2, ":", "@", "RT"]
-    for w in words:
-        GT.ngwords.append(f"[{w}]")
-    GT.mincountlike = 5
-    GT.maxcountlike = 50
-    GT.maxcounttweet = 6000
-    #
-    #sks = [ "スパイファミリー","クラナド","かぐや様","五等分の花嫁","明日ちゃんのセーラー服","進撃の巨人","ジョジョ", "CloverWorks", "バキ", "着せ恋","王様ランキング", "鬼滅の刃", "Eldenring", "バイオハザード", "ストリートファイター", "Shadowverse", "VR", "UnrealEngine", "ビートセイバー", "Oculus", "東方", "ミク"]
-    sks = ["Apex"]
-    for sk in sks:
-        GT.getTweetKeyword(sk, 30, -1, True, True, True)
-    GT.Quit()
-    """
-    """
-    words = [f"[{re_num1}]", f"[{re_num2}]", ":", "@", "RT"]
-    infos = [{"tweet":"APEXMOBILEのリリースが決定したため…@CODM_BOT1 はAPEXMOBILE界隈に参戦致します！APEX版→@APEXM_BOT2"},{"tweet":"1日の約1/10の時間をApexに割いていることが判明しました"},{"tweet":"APEXのシーズンのオープニングさ英語やって字幕も無かったから何言ってんかわかんなかったなww"},{"tweet":"いまのAPEX難しくなったけど難しければ難しいほど燃えるのでこれで良い　　全員倒すからな............"},{"tweet":"APEXランクマジで楽しい明日にはダイヤ行きたいなマジで今シーズンポイントしょっぱすぎ！プレデター埋まるの2週間くらいかかりそう笑"},{"tweet":"5月色んな個人的イベント多くて混乱してる18日APEXモバイル配信日        ＆コロナワクチン3回目20日TheForest2発売日29日資格試験その他にもなにかがあった気がするが覚えていない･"},{"tweet":"おはようございますついにAPEXモバイル出るらしいね！！パプジ勢の皆様お待ちしております"}]
-    # NGワード
-    for info in infos:
-        for nw in words:
-            t = info["tweet"]
-            if re.search(nw, t):
-                print(f"True: {t}")
-                break
-            else:
-                print(f"False: {t}")
-    """
-    """
     GT = ScrayTwitter()
-
-    targetid = "@Mame_K_I"
-    ids = GT.GetAcountForFollowing(targetid)
-    for id in ids:
-        #GT.DoTimeCounter("GetHome")
-        GT.GetTwitterHome(id)
-        #GT.DoTimeCounter("GetHome")
-        #GT.DoTimeCounter("GetTweet")
-        #tws = GT.GetTweet(id, 30, 12, 0, True, True, False, False, id)
-        #GT.DoTimeCounter("GetTweet")
+    GT.GetTweet("@enako_cos", 30, 60, 0, True, True, False, False, "@enako_cos", None, True)
     GT.Quit()
-    """
-    #os.rmdir()
-    #folders = glob.glob("C:\\Users\\hikac\\Documents\\VSCode\\Pythons\\TwitterProject\\datas\\Users\\@*")
-    #print(folders)
-    #targetfolders = glob.glob("C:\\Users\\hikac\\Documents\\VSCode\\Pythons\\TwitterProject\\datas\\Users\\@*")
-    #for f in folders:
-    #    try:
-    #        os.rename(f + "\\Images\\Images", f + "\\Images\\hogehogemaru")
-    #    except:
-    #        pass
-        #try:
-        #    for p in os.listdir(f + "\\Images\\Images"):    
-        #        shutil.move(os.path.join(f + "\\Images\\Images\\", p), f + "\\Images")
-        #except:
-        #    pass
+    """NL = NLProcessing()
+    #print(NL.np_rate("メロスは激怒した。必ず、かの暴虐の王を覗かなければならぬと決意した"))
+    #NL.GetWordView_chiVe("女性")
+    #NL.GetWordView_fastText("女性")
+    tws = g.LoadData(r"Users\@enako_cos", "Tweet")
+    tweets = ""
+    for tw in tws:
+        tweets += tw["tweet"]
+    NL.MakeMorphologicalAnalysis(tweets)"""
