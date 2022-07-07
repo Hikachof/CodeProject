@@ -1,5 +1,3 @@
-from asyncio.windows_events import NULL
-from distutils.log import error
 from fileinput import filename
 #from datetime import date
 from gc import get_freeze_count
@@ -47,6 +45,9 @@ import glob
 import random
 import atexit
 import copy
+import subprocess
+import concurrent.futures
+import pyautogui
 
 import General as g
 
@@ -68,7 +69,7 @@ re_kigou_a = "`|,|.|_|^|\＾|ﾉ|;|；|/|／|:|：|ゝ|*|ヾ|\"|Ｏ|\\\|+|＋|�
 re_kigou_b = "!|-|?|"
 
 
-CHROMEDRIVERPATH = "C:/Users/hikac/Documents/VSCode/Pythons/TwitterProject/chromedriver.exe"
+CHROMEDRIVERPATH = "/usr/bin/chromedriver"
 
 
 # === 構造体 ===
@@ -82,22 +83,26 @@ class FTwitterLoginData:
 # Seleniumなどを用いたスクレイピングのクラス
 class ScraypinIn:
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36'}
-    driver = NULL
+    driver = None
     oldProcessTime = 0
 
-    basefolder = "C:\\Users\\hikac\\Desktop\\datas\\"
+    basefolder = "/home/hikbot/デスクトップ/GFA/datas/"
 
     counttimes = {}
 
-    def __init__(self):
-        #　ヘッドレスモードでブラウザを起動
-        options = Options()
-        options.add_argument('--headless')
-        options.add_experimental_option('excludeSwitches', ['enable-logging'])
-        
+    def __init__(self):        
         # ブラウザーを起動
         chrome_service = fs.Service(executable_path=CHROMEDRIVERPATH)
-        self.driver = webdriver.Chrome(service=chrome_service)
+
+        #　ヘッドレスモードでブラウザを起動
+        options = Options()
+        options.add_argument(f'service={chrome_service}')
+        options.headless = True
+        options.add_argument('--headless')
+        options.add_experimental_option('excludeSwitches', ['enable-logging'])
+
+        #self.driver = webdriver.Chrome(service=chrome_service)
+        self.driver = webdriver.Chrome(options=options)
 
         self.DoTimeCounter("GT_ALL")
 
@@ -192,6 +197,7 @@ class ScraypinIn:
         except:
             try:
                 filepath = filepath.replace("json", "npy")
+                #print(filepath)
                 return np.load(filepath)
             except:
                 pass
@@ -279,15 +285,6 @@ class ScraypinIn:
         # driver.close()
         #self.Quit()
 
-    # ツイッターなどから取得できる簡略化された文字数字を数値に変換する
-    def FixStrNumber(self, stnum):
-        stnum = stnum.replace(",", "")
-        if "万" in stnum:
-            stnum = stnum.replace("万", "")
-            stnum = float(stnum) * 10000
-
-        return int(stnum)
-
 # Seleniumを用いたTwitterからの情報収集
 class ScrayTwitter(ScraypinIn):
     # パラメータ
@@ -317,7 +314,7 @@ class ScrayTwitter(ScraypinIn):
     maxcountreply = 0
     # -- LOCAL VALUES --
     # スクロール時に最後に読み取ったデータ
-    LastElemData = NULL
+    LastElemData = None
     #LastElemDataCount = 0
     # 実行内容はここに保存される
     tweet_list = []
@@ -346,6 +343,7 @@ class ScrayTwitter(ScraypinIn):
     def Reset(self):
         self.tweet_list.clear()
         self.id_list.clear()
+        print("Reset" + " : " + self.myID)
 
     # ツイートの内容をチェックする
     def CheckInfo(self, info):
@@ -1238,7 +1236,7 @@ class ScrayTwitter(ScraypinIn):
         url = "https://twitter.com/" + targetID + "/following"
 
         driver.get(url)
-        time.sleep(1.2)
+        time.sleep(3)
         #
         elem_followings = driver.find_element(By.XPATH, "//div[contains(@aria-label, 'タイムライン: フォロー中')]")
         ids = []
@@ -1257,8 +1255,8 @@ class ScrayTwitter(ScraypinIn):
             time.sleep(self.scroll_wait_time)
 
         file_path = "Users/" + targetID
-        file_name = "Following"
-        GT.SaveData(ids, file_path, file_name)
+        file_name = "Followin"
+        GT.SaveData(file_path, file_name)
               
         return ids
 
@@ -1428,13 +1426,12 @@ class ScrayTwitter(ScraypinIn):
     def GetTwitterHome(self, targetID):
         driver = self.driver
         #atexit.register(self.Reset)
-
         # すでに存在している場合は処理しない
         file_path = "Users/" + targetID
         file_name = "TwitterHome"
-        dummy = self.LoadData(file_path, file_name)
-        if dummy:
-            return dummy
+        ld = self.LoadData(file_path, file_name)
+        if ld:
+            return ld
 
         try:
             url = "https://twitter.com/" + targetID
@@ -1442,8 +1439,9 @@ class ScrayTwitter(ScraypinIn):
 
             homeData = {}
 
-            time.sleep(5)
+            time.sleep(3)
             #
+            file_path = "Users/" + targetID
             try:
                 elem_banner = driver.find_element(By.XPATH, "//img[contains(@src, 'profile_banners')]")
                 file_name = targetID + "_Banner"
@@ -1462,7 +1460,7 @@ class ScrayTwitter(ScraypinIn):
             #    print(str(i) + ":" + s.text)
             homeData["name"] = elems_username_span[1].text
             homeData["id"] = elems_username_span[3].text
-            
+
             # divの個数がBannerによって変化するので対応している
             elem_home = driver.find_element(By.XPATH, "//nav[@aria-label='プロフィールタイムライン'][@role='navigation']")
             elem_home = elem_home.find_element(By.XPATH, "./../div")
@@ -1484,34 +1482,22 @@ class ScrayTwitter(ScraypinIn):
                 else:
                     homeData["opendate"] = pf.text
             elems_follow = elems_home_div[-2].find_elements(By.XPATH, "./div")
-            homeData["follow"] = self.FixStrNumber(elems_follow[0].text.split()[0])
-            homeData["follower"] = self.FixStrNumber(elems_follow[1].text.split()[0])
+            homeData["follow"] = elems_follow[0].text.split()[0]
+            homeData["follower"] = elems_follow[1].text.split()[0]
             
             #
             #print(homeData)
-            #
+            file_path = "Users/" + targetID
             file_name = "TwitterHome"
+            #
             self.SaveData(homeData, file_path, file_name)
-            
             savelist = copy.deepcopy(homeData)
-
             self.Reset()
-
             return savelist
         except:
-            errorchecks = driver.find_elements(By.XPATH, "//div[@role='button']")
-            for ec in errorchecks:
-                if ec.text == "やりなおす":
-                    print("過度なアクセスになっている")
-                    time.sleep(600)
-                    self.GetTwitterHome(targetID)
-                    return
-            # 通常のエラー処理
-            print("HomeError: " + targetID)
-            file_name = "TwitterHome"
-            self.SaveData("empty", file_path, file_name)
             pass
         self.Reset()
+        
 
     # キーワードを指定してそれに関するツイートを取得する
     # wordにIDを指定して、foracountをTrueとすれば、そのIDの発言を取得できる
@@ -1541,7 +1527,7 @@ class ScrayTwitter(ScraypinIn):
             #since_y,since_m,since_d = self.getDateTime(since_y, since_m, since_d, offsetmonth)
             UntilTime = UntilTime - dtime.timedelta(days=offsetday)
             until_y, until_m, until_d = self.GetDateTime(UntilTime)
-            
+        
         # 指定した月遡ってデータを得る
         # １月単位でデータを得ることによって読み込み速度を上げる
         SinceTime = UntilTime
@@ -1589,10 +1575,13 @@ class ScrayTwitter(ScraypinIn):
                 url += f"%20-min_replies%3A{self.maxcountreply}"
             url += "%20lang%3Aja&src=typed_query&f=live"
             #
-            # url = f"https://twitter.com/search?q={word}%20since%3A{since}%20until%3A{until}%20-filter%3Areplies&src=typed_query&f=live"
-            driver.get(url)
-            #print(url)
-        
+            try:
+                driver.get(url)
+            except:
+                print("ERROR: URL: " + url)
+                self.Reset()
+                return
+
             # articleタグが読み込まれるまで待機（最大15秒）
             try:
                 WebDriverWait(driver, 3.0).until(EC.visibility_of_element_located((By.TAG_NAME, 'article')))
@@ -1602,14 +1591,24 @@ class ScrayTwitter(ScraypinIn):
                 if self.maxgettweetcount != 0 and self.maxgettweetcount < len(self.tweet_list):
                     break
                 # 取得ツイート数によって取得日数を変動させる
-                newlistnum = len(self.tweet_list) - listnum
+                nowlistnum = len(self.tweet_list)
+                newlistnum = nowlistnum - listnum
                 if newlistnum == 0:
                     backday *= 3
                 backday = int((100 / newlistnum) * backday)
-                print("BACKDAY:" + str(backday))
-
+                if backday < 0:
+                    print(self.myID + " : " + word + ":" + str(i) + ":" + since + ":" + until)
+                    print("BACKDAY:" + str(backday) + " : " + str(newlistnum) + " : " + str(listnum) + " : " + str(nowlistnum))
+                    backday = abs(backday)
             except:
+                backday *= 3
                 pass
+
+            # 
+            if backday > 500:
+                break
+        
+            
 
         if len(self.tweet_list) > 0:
             if baseFileName:
@@ -1620,6 +1619,9 @@ class ScrayTwitter(ScraypinIn):
             self.Reset()
 
             return savelist
+        else:
+            if baseFileName:
+                self.SaveData("empty", file_path, file_name)
 
         self.Reset()
 
@@ -1647,7 +1649,7 @@ class ScrayTwitter(ScraypinIn):
 
         #print("A")
 
-        prevelem = NULL
+        prevelem = None
         for elem_article in elems_article:
             if elem_article:
                 #print("B")
@@ -1709,7 +1711,8 @@ class ScrayTwitter(ScraypinIn):
                                     imgcount += 1
                                     self.SaveImage(photourl, file_path, file_name + "_" + str(imgcount))
                         except:
-                            print("ERROR: IMG " + tweet["name"] + " : " + tweet["id"])
+                            #print("ERROR: IMG " + tweet["name"] + " : " + tweet["id"])
+                            pass
                     
 
                     #print(tweet)
@@ -1956,81 +1959,47 @@ class ScrayTwitter(ScraypinIn):
             self.LastElemData = last_elem
             return False
 
+# ツイートの作成とDBへの追加
+def Routine01(user):
+    GT = ScrayTwitter(user)
 
+    targetid = "@enako_cos"
+    ids = GT.GetAcountForFollowing(targetid)
+    ids = ids.tolist()
+    GT.maxgettweetcount = 300
+    for id in ids:
+        #print(id)
+        GT.GetTwitterHome(id)
+        tws = GT.GetTweet(id, 30, 12, 0, True, True, False, False, id)
+    GT.Quit()
+
+def Routine02(user):
+    GT = ScrayTwitter(user)
+
+    targetid = "@enako_cos"
+    ids = GT.GetAcountForFollowing(targetid)
+    GT.maxgettweetcount = 300
+    ids = ids.tolist()
+    ids.reverse()
+    for id in ids:
+        #print(id)
+        GT.GetTwitterHome(id)
+        tws = GT.GetTweet(id, 30, 12, 0, True, True, False, False, id)
+    GT.Quit()
 
 if __name__ == '__main__':
-    #ids = ["hatsumememe"]
-    #for id in ids:
-    #    GT = ScrayTwitter(id)
-    #    GT.AllGetTwitters()
-    #GT = ScrayTwitter("lepumoshion", "enako_cos")
-    #GT.DoFollow()
-    #GT.DoTweet_Like("1531127775360598016")
-    #GT.Quit()
-    #SP = ScraypinIn()
-    #SP.SearchUserSite("えなこ")
-    """
-    #sks = [ "Apex", "スパイファミリー","クラナド","かぐや様","五等分の花嫁","明日ちゃんのセーラー服","進撃の巨人","ジョジョ", "CloverWorks", "バキ", "着せ恋","王様ランキング", "鬼滅の刃",
-    #        "Eldenring", "バイオハザード", "ストリートファイター", "Shadowverse", "VR", "UnrealEngine", "ビートセイバー", "Oculus", "東方", "ミク"]
-    sks = ["Apex"]
-    GT = ScrayTwitter(None, None)
-    for sk in sks:
-        GT.printTwitter(sk, f"C:\\Users\\hikac\\Documents\\VSCode\\Pythons\\TwitterProject\\datas\\Tweets\\{sk}_TwitterData.json")
-    GT.Quit()
-    """
-    """
-    GT = ScrayTwitter(None, None)
-    words = [re_num1, re_num2, ":", "@", "RT"]
-    for w in words:
-        GT.ngwords.append(f"[{w}]")
-    GT.mincountlike = 5
-    GT.maxcountlike = 50
-    GT.maxcounttweet = 6000
-    #
-    #sks = [ "スパイファミリー","クラナド","かぐや様","五等分の花嫁","明日ちゃんのセーラー服","進撃の巨人","ジョジョ", "CloverWorks", "バキ", "着せ恋","王様ランキング", "鬼滅の刃", "Eldenring", "バイオハザード", "ストリートファイター", "Shadowverse", "VR", "UnrealEngine", "ビートセイバー", "Oculus", "東方", "ミク"]
-    sks = ["Apex"]
-    for sk in sks:
-        GT.getTweetKeyword(sk, 30, -1, True, True, True)
-    GT.Quit()
-    """
-    """
-    words = [f"[{re_num1}]", f"[{re_num2}]", ":", "@", "RT"]
-    infos = [{"tweet":"APEXMOBILEのリリースが決定したため…@CODM_BOT1 はAPEXMOBILE界隈に参戦致します！APEX版→@APEXM_BOT2"},{"tweet":"1日の約1/10の時間をApexに割いていることが判明しました"},{"tweet":"APEXのシーズンのオープニングさ英語やって字幕も無かったから何言ってんかわかんなかったなww"},{"tweet":"いまのAPEX難しくなったけど難しければ難しいほど燃えるのでこれで良い　　全員倒すからな............"},{"tweet":"APEXランクマジで楽しい明日にはダイヤ行きたいなマジで今シーズンポイントしょっぱすぎ！プレデター埋まるの2週間くらいかかりそう笑"},{"tweet":"5月色んな個人的イベント多くて混乱してる18日APEXモバイル配信日        ＆コロナワクチン3回目20日TheForest2発売日29日資格試験その他にもなにかがあった気がするが覚えていない･"},{"tweet":"おはようございますついにAPEXモバイル出るらしいね！！パプジ勢の皆様お待ちしております"}]
-    # NGワード
-    for info in infos:
-        for nw in words:
-            t = info["tweet"]
-            if re.search(nw, t):
-                print(f"True: {t}")
-                break
-            else:
-                print(f"False: {t}")
-    """
-    """
-    GT = ScrayTwitter()
+    # サブルーチンによる並行処理
+    #executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+    #executor.submit(Routine01, "hikarutanden")
+    #executor.submit(Routine02, "Aun114514")
 
-    targetid = "@Mame_K_I"
-    ids = GT.GetAcountForFollowing(targetid)
-    for id in ids:
-        #GT.DoTimeCounter("GetHome")
-        GT.GetTwitterHome(id)
-        #GT.DoTimeCounter("GetHome")
-        #GT.DoTimeCounter("GetTweet")
-        #tws = GT.GetTweet(id, 30, 12, 0, True, True, False, False, id)
-        #GT.DoTimeCounter("GetTweet")
+    # 途中で謎のフリーズをする可能性が高いので一時しのぎ的対処をしている
+    #time.sleep(3600)
+    #print("reboot")
+    #pyautogui.hotkey('ctrl', 'shift', 'f5')
+
+    id = "@dasoku_youtube"
+    GT = ScrayTwitter("hikarutanden")
+    GT.GetTwitterHome(id)
+    GT.GetTweet(id, 30, 12, 0, True, True, False, False, id)
     GT.Quit()
-    """
-    #os.rmdir()
-    #folders = glob.glob("C:\\Users\\hikac\\Documents\\VSCode\\Pythons\\TwitterProject\\datas\\Users\\@*")
-    #print(folders)
-    #targetfolders = glob.glob("C:\\Users\\hikac\\Documents\\VSCode\\Pythons\\TwitterProject\\datas\\Users\\@*")
-    #for f in folders:
-    #    try:
-    #        os.rename(f + "\\Images\\Images", f + "\\Images\\hogehogemaru")
-    #    except:
-    #        pass
-        #try:
-        #    for p in os.listdir(f + "\\Images\\Images"):    
-        #        shutil.move(os.path.join(f + "\\Images\\Images\\", p), f + "\\Images")
-        #except:
-        #    pass
