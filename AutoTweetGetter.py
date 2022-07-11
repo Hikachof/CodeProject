@@ -1,4 +1,4 @@
-from asyncio.windows_events import NULL
+#from asyncio.windows_events import None
 from distutils.log import error
 from fileinput import filename
 #from datetime import date
@@ -10,6 +10,7 @@ import shutil
 from tkinter import BooleanVar
 from tracemalloc import start
 from types import NoneType
+from weakref import WeakKeyDictionary
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
@@ -31,6 +32,7 @@ from operator import itemgetter
 from collections import defaultdict
 
 from janome.tokenizer import Tokenizer
+from pyknp import Juman
 
 from bs4 import BeautifulSoup
 import time
@@ -54,7 +56,7 @@ import atexit
 import copy
 import csv
 import gensim
-import MeCab
+#import MeCab
 
 import General as g
 
@@ -76,7 +78,7 @@ re_kigou_a = "`|,|.|_|^|\＾|ﾉ|;|；|/|／|:|：|ゝ|*|ヾ|\"|Ｏ|\\\|+|＋|�
 re_kigou_b = "!|-|?|"
 
 
-CHROMEDRIVERPATH = "C:/Users/hikac/Documents/VSCode/Pythons/TwitterProject/chromedriver.exe"
+CHROMEDRIVERPATH = "/usr/bin/chromedriver"
 
 
 # === 構造体 ===
@@ -148,10 +150,17 @@ class NLProcessing:
         return pos_count, neg_count, word_count
 
     # chiVeによる単語解析
-    def GetWordView_chiVe(self, word):
+    def GetNLModel_chiVe(self):
         # モデルの読み込み
-        MODEL_PATH = r"C:\Users\hikac\Desktop\LangModels\chive-1.2-mc5_gensim\chive-1.2-mc5_gensim\chive-1.2-mc5.kv"
-        wv = gensim.models.KeyedVectors.load(MODEL_PATH)
+        MODEL_PATH = r"\home\hikachof\デスクトップ\LangModels\chive-1.2-mc5_gensim\chive-1.2-mc5_gensim\chive-1.2-mc5.kv"
+        return gensim.models.KeyedVectors.load(MODEL_PATH)
+    def GetNLModel_fastText(self):
+        # モデルの読み込み
+        MODEL_PATH = r"\home\hikachof\デスクトップ\LangModels\cc.ja.300.vec"
+        return gensim.models.KeyedVectors.load_word2vec_format(MODEL_PATH, binary=False)
+
+    def GetWordView_chiVe(self, word):
+        wv = self.GetNLModel_chiVe()
         
         # 類似度上位10件を取得
         match = wv.most_similar(word, topn=10)
@@ -161,9 +170,7 @@ class NLProcessing:
 
     # fastTextによる単語解析
     def GetWordView_fastText(self, word):
-        # モデルの読み込み
-        MODEL_PATH = r"C:\Users\hikac\Desktop\LangModels\cc.ja.300.vec"
-        wv = gensim.models.KeyedVectors.load_word2vec_format(MODEL_PATH, binary=False)
+        wv = self.GetNLModel_fastText()
         
         # 類似度上位10件を取得
         match = wv.most_similar(word, topn=10)
@@ -172,7 +179,13 @@ class NLProcessing:
         print(match)
 
     # 形態素解析１
-    def MakeMorphologicalAnalysis(self, txt):
+    def MakeMorphologicalAnalysis_KNP(self, txt):
+        jumanpp = Juman()
+        res = jumanpp.analysis(txt)
+        for mrph in res.mrph_list(): # 各形態素にアクセス
+            print("見出し:%s, 読み:%s, 原形:%s, 品詞:%s, 品詞細分類:%s, 活用型:%s, 活用形:%s, 意味情報:%s, 代表表記:%s" % (mrph.midasi, mrph.yomi, mrph.genkei, mrph.hinsi, mrph.bunrui, mrph.katuyou1, mrph.katuyou2, mrph.imis, mrph.repname))
+
+    def MakeMorphologicalAnalysis_MeCab(self, txt):
         option0 = ''
         option1 = '-Ochasen'
         option2 = '-Owakati'
@@ -210,8 +223,9 @@ class NLProcessing:
         #print(word_freq)
         
         sort_words = sorted(word_freq.items(), key=lambda x:x[1], reverse=True)
-        for sw in sort_words:
-            print(sw)
+        #for sw in sort_words:
+        #    print(sw)
+        return sort_words
         
     
 
@@ -219,19 +233,22 @@ class NLProcessing:
 # Seleniumなどを用いたスクレイピングのクラス
 class ScraypinIn:
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36'}
-    driver = NULL
+    driver = None
 
     counttimes = {}
 
     def __init__(self):
-        #　ヘッドレスモードでブラウザを起動
-        options = Options()
-        options.add_argument('--headless')
-        options.add_experimental_option('excludeSwitches', ['enable-logging'])
-        
         # ブラウザーを起動
         chrome_service = fs.Service(executable_path=CHROMEDRIVERPATH)
-        self.driver = webdriver.Chrome(service=chrome_service)
+
+        #　ヘッドレスモードでブラウザを起動
+        options = Options()
+        options.add_argument(f'service={chrome_service}')
+        #options.headless = True
+        #options.add_argument('--headless')
+        options.add_experimental_option('excludeSwitches', ['enable-logging'])
+
+        self.driver = webdriver.Chrome(options=options)
 
         self.DoTimeCounter("GT_ALL")
 
@@ -254,43 +271,6 @@ class ScraypinIn:
         time.sleep(3)
         self.driver.quit()
 
-    # Twitterから取得される日付文字列を最適化する
-    def getFixDateTime(self, date):
-        #print("A")
-        dates = date.split(" · ")
-        t = dates[0]
-        #print("t" + t)
-        d = dates[1]
-        #print("d" + d)
-        tt = t[2:]
-        #print("tt" + tt)
-        tt = tt.split(":")
-        #print("tt" + tt)
-        tt1 = tt[0]
-        #print("tt1" + tt1)
-        tt2 = tt[1]
-        #print("tt2" + tt2)
-        if "午後" in t:
-            tt1 = str(int(tt1) + 12)
-        #
-        t = tt1.zfill(2) + "_" + tt2.zfill(2)
-        #print("t" + t)
-        #
-        
-        d = d.split("年")
-        d1 = d[0]
-        #print(d1)
-        d = d[1].split("月")
-        d2 = d[0]
-        #print(d2)
-        d = d[1].split("日")
-        d3 = d[0]
-        #print(d3)
-        d2 = d2.zfill(2)
-        d3 = d3.zfill(2)
-        #print(d1 + "_" + d2 + "_" + d3 + "_" + t)
-        date = d1 + "_" + d2 + "_" + d3 + "_" + t
-        return date
 
     # 指定した名前で検索してすべての配信情報を得る
     def SearchUserSite(self, username):
@@ -360,7 +340,7 @@ class ScrayTwitter(ScraypinIn):
     maxcountreply = 0
     # -- LOCAL VALUES --
     # スクロール時に最後に読み取ったデータ
-    LastElemData = NULL
+    LastElemData = None
     #LastElemDataCount = 0
     # 実行内容はここに保存される
     tweet_list = []
@@ -1597,17 +1577,24 @@ class ScrayTwitter(ScraypinIn):
                 if self.maxgettweetcount != 0 and self.maxgettweetcount < len(self.tweet_list):
                     break
                 # 取得ツイート数によって取得日数を変動させる
-                newlistnum = len(self.tweet_list) - listnum
+                nowlistnum = len(self.tweet_list)
+                newlistnum = nowlistnum - listnum
                 if newlistnum == 0:
                     backday *= 3
                 self.debugnum = "C"
                 backday = int((100 / newlistnum) * backday)
                 self.debugnum = "D"
-                #print("BACKDAY:" + str(backday))
+                if backday < 0:
+                    print(self.myID + " : " + word + ":" + str(i) + ":" + since + ":" + until)
+                    print("BACKDAY:" + str(backday) + " : " + str(newlistnum) + " : " + str(listnum) + " : " + str(nowlistnum))
+                    backday = abs(backday)
 
             except:
                 print("ERROR:" + self.debugnum)
                 pass
+            # 
+            if backday > 500:
+                break
 
         if len(self.tweet_list) > 0:
             if baseFileName:
@@ -1620,6 +1607,9 @@ class ScrayTwitter(ScraypinIn):
             self.Reset()
 
             return savelist
+        else:
+            if baseFileName:
+                self.SaveData("empty", file_path, file_name)
 
         self.Reset()
 
@@ -1650,21 +1640,22 @@ class ScrayTwitter(ScraypinIn):
         self.debugnum = "BA"
 
         for elem_article in elems_article:
-            try:
-                elems_a = elem_article.find_elements(By.TAG_NAME, "a")
-            except:
-                print("Hoge")
-                print(elem_article)
             if elem_article:
                 self.debugnum = "START"
                 try:
                     elems_a = elem_article.find_elements(By.TAG_NAME, "a")
                 except:
-                    print("Piyo")
-                    print(elem_article)
-                self.debugnum = "BBA"
+                    self.debugnum = "BBA"
+                    continue                
                 # ツイートへのURLによってすでにそれが読み込まれているかをチェックする
-                id = elems_a[3].get_attribute("href")
+                self.debugnum = "HOP"
+                try:
+                    id = elems_a[3].get_attribute("href")
+                except:
+                    for o,ea in enumerate(elems_a):
+                        print(str(o) + " : " + ea.text)
+                    self.debugnum = "HREF BAG"
+                    continue
                 self.debugnum = "BBB"
                 id = id.split("status/")[-1]
                 self.debugnum = "BBC"
@@ -1908,7 +1899,7 @@ class ScrayTwitter(ScraypinIn):
                         for d in date:
                             s += d
                         #print(s)
-                        date = self.getFixDateTime(s)
+                        date = g.getFixDateTime(s)
                         file_name = targetID + "_" + "RT_" + t_id + "_" + date + "_" + tweet_id + "_" + str(num)
                         imgurl = img.get_attribute("src")
                         g.SaveImage(imgurl, file_path, file_name)
@@ -1972,15 +1963,119 @@ class ScrayTwitter(ScraypinIn):
 
 
 if __name__ == '__main__':
-    GT = ScrayTwitter()
-    GT.GetTweet("@enako_cos", 30, 60, 0, True, True, False, False, "@enako_cos", None, True)
-    GT.Quit()
-    """NL = NLProcessing()
-    #print(NL.np_rate("メロスは激怒した。必ず、かの暴虐の王を覗かなければならぬと決意した"))
-    #NL.GetWordView_chiVe("女性")
-    #NL.GetWordView_fastText("女性")
-    tws = g.LoadData(r"Users\@enako_cos", "Tweet")
-    tweets = ""
-    for tw in tws:
-        tweets += tw["tweet"]
-    NL.MakeMorphologicalAnalysis(tweets)"""
+    if False:
+        from pyknp import Juman
+        jumanpp = Juman()
+        result = jumanpp.analysis("すもももももももものうち")
+        for mrph in result.mrph_list(): # 各形態素にアクセス
+            print("見出し:%s, 読み:%s, 原形:%s, 品詞:%s, 品詞細分類:%s, 活用型:%s, 活用形:%s, 意味情報:%s, 代表表記:%s" \
+                    % (mrph.midasi, mrph.yomi, mrph.genkei, mrph.hinsi, mrph.bunrui, mrph.katuyou1, mrph.katuyou2, mrph.imis, mrph.repname))
+    #GT = ScrayTwitter()
+    #GT.GetTweet("@enako_cos", 30, 60, 0, True, True, False, False, "@enako_cos", None, True)
+    #GT.Quit()
+    if False:
+        NL = NLProcessing()
+        #print(NL.np_rate("メロスは激怒した。必ず、かの暴虐の王を覗かなければならぬと決意した"))
+        #wv = NL.GetNLModel_chiVe()
+        #words = wv.most_similar('職業', topn=10)
+        #print(wv.similarity('職業', 'モデル'))
+        
+        
+        keywords_P_hobby = ["ゲーム", "スプラ", "スマブラ", "Apex", "プレステ", "スイッチ", "Switch", "格ゲー", "アニメ", "今期", "リズムゲー", "オタク"]
+        keywords_N_hobby = ["BTS"]
+        keywords_P_sex = ["私"]
+        keywords_N_sex = ["俺", "僕"]
+        keywords_P_job = ["バイト", "コス", "コスプレ", "配信", "投稿", "風俗", "アイドル", "地下", "モデル", "大学", "学生", "学校", "教室", "部活", "試験", "徹夜", "進路", "親友", "友達", "大会", "下校", "放課後", "看護", "ナース", "サークル", "成人式", "ゲーマー", "高校"]
+        keywords_N_job = ["会社", "営業", "通勤", "残業"]
+        keywords_P_loneli = ["イベント", "出会い", "夏コミ", "サークル", "コミケ", "別れ", "募"]
+        keywords_N_loneli = ["恋人", "彼氏", "子供", "婚活"]
+        keywords_P_home = ["名古屋", "愛知", "新宿", "原宿"]
+        keywords_N_home = []
+        keywords_P_mental = ["鬱", "孤独", "一人", "誰か", "死", "氏", "どうにか"]
+        keywords_N_mental = ["たくさん", "パーティ"]
+        #NGWords = ["セフレ", "セクフレ"]
+
+
+        if True:
+            files = glob.glob(r"C:\Users\hikac\Desktop\datas\Users\@*")
+            TargetIDs = []
+            for fi in files[:10]:
+                ws = []
+                id = fi.split("\\")[-1]
+                tws = g.LoadData(r"Users\\" + id, "TwitterHome")
+                if tws:
+                    try:
+                        th = tws[0]["overview"]
+                    except:
+                        pass
+                    NL.MakeMorphologicalAnalysis_KNP(th)
+                    #print(id)
+                    #print(words)
+                    
+
+        if False:
+            files = glob.glob(r"C:\Users\hikac\Desktop\datas\Users\@*")
+            TargetIDs = []
+            #ids = ["@iorimoe_five", "@chanbaekkailu1", "@193iKkyu3", "@kokoro777pp", "@naomi_majima", "@mizuyuno_", "@saki_miyamoto", "@nashiko_cos"]
+            for fi in files:
+            #for id in ids:
+                ws = []
+                id = fi.split("\\")[-1]
+                tws = g.LoadData(r"Users\\" + id, "Tweet")
+                if isinstance(tws, list):                
+                    tweets = ""
+                    twnum = len(tws)
+                    # ツイート数が少ないものも削除
+                    if twnum < 100:
+                        continue
+                    for tw in tws:
+                        t = tw["tweet"]
+                        tweets += t
+                    words = NL.MakeMorphologicalAnalysis(tweets)
+
+                    if False:
+                        print(id + " : " + str(twnum))
+                        for w in words:
+                            if w[1] > 10:
+                                print(w)
+
+                    if True:
+                        # 一人称によって男女の判別を行う
+                        PositiveWords = keywords_josei
+                        NegativeWords = keywords_otoko
+                        TargetCount = 0
+                        for w in words:
+                            for ww in PositiveWords:
+                                if ww in w[0]:
+                                    TargetCount += w[1]
+                                    ws.append(w)
+                            for ww in NegativeWords:
+                                if ww in w[0]:
+                                    TargetCount -= w[1] * 20
+                                    ws.append(w)
+                        # 指定したワードを多く含むIDを取得する
+                        TargetIDs.append({"ID": id, "TargetCount": TargetCount, "Words": ws})
+            #
+            g.SaveData(TargetIDs, "damp", "TargetIDs")
+            print("TargetIDs :" + str(len(TargetIDs)))
+    if False:
+        datas = g.LoadData("damp", "TargetIDs")
+        GT = ScrayTwitter()
+        for data in datas:
+            if data["TargetCount"] > 15:
+                GT.driver.get(f"https://twitter.com/{data['ID']}")
+                print(data['Words'])
+                time.sleep(3)
+        GT.Quit()
+
+    #tws = g.LoadData("Users\@enako_cos", "Tweet")
+    #eds = []
+    #for tw in tws:
+    #    eds.append(g.GetSimplificationDateTime(tw["datetime"])) 
+
+    #
+    #g.MakeGraph_date(eds, "year")
+    #g.MakeGraph_date(eds, "month")
+    #g.MakeGraph_date(eds, "week", "2019-2021")
+    #g.MakeGraph_date(eds, "week", "2019-2021", None, None, "22-5")
+    #g.MakeGraph_date(eds, "hour")
