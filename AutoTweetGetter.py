@@ -224,6 +224,7 @@ class NLProcessing:
         elements = parsed_txt.split("\n")[:-2]
         for element in elements:
             #print(element)
+            #print(element)
             parts = element.split(",")
             surface_pos = parts[0].split("\t")
             try:
@@ -240,19 +241,23 @@ class NLProcessing:
         #print(ress)
         # 要素の出現頻度を計算する
         word_freq = defaultdict(int)
+        word_kigou = defaultdict(int)
 
         #
         for res in ress:
             #print(res)
             if res["品詞"] == '名詞':
                 word_freq[res['基本形']] += 1
+            if res["品詞"] == '記号':
+                word_kigou[res['基本形']] += 1
 
         #print(word_freq)
         
-        sort_words = sorted(word_freq.items(), key=lambda x:x[1], reverse=True)
+        sort_freqs = sorted(word_freq.items(), key=lambda x:x[1], reverse=True)
+        sort_kigous = sorted(word_kigou.items(), key=lambda x:x[1], reverse=True)
         #for sw in sort_words:
         #    print(sw)
-        return sort_words
+        return sort_freqs, sort_kigous
         
     
 
@@ -1197,6 +1202,7 @@ class ScrayTwitter(ScraypinIn):
             elem_btn_tw = driver.find_element(By.XPATH, "//div[contains(@data-testid, 'tweetButtonInline')]")
             elem_btn_tw.click()
 
+
     # 指定したツイートをいいねしているアカウントを取得する
     def GetAcountForLike(self, targetID, tweetID):
         driver = self.driver
@@ -1207,6 +1213,33 @@ class ScrayTwitter(ScraypinIn):
         time.sleep(1.2)
         #
         elem_likes = driver.find_element(By.XPATH, "//div[contains(@aria-label, 'タイムライン: いいねしたユーザー')]")
+        ids = []
+        # ループさせながらスクロールして取得していく
+        while True:
+            elems_like = elem_likes.find_elements(By.XPATH, ".//div[@dir='ltr']")
+            for elem_like in elems_like:
+                getid = elem_like.text
+                if not (getid in ids):
+                    ids.append(getid)
+            
+            if self.scroll_to_elem(elem_likes, By.XPATH, "./div/div[@data-testid='cellInnerDiv']"):
+                break
+            
+            # 待つ（サイトに負荷を与えないと同時にコンテンツの読み込み待ち）
+            time.sleep(self.scroll_wait_time)
+              
+        return ids
+
+    # 指定したIDのリツイートの比率を取得する
+    def GetAcountForLike(self, targetID, tweetID):
+        driver = self.driver
+
+        url = "https://twitter.com/" + targetID
+
+        driver.get(url)
+        time.sleep(1.2)
+        #
+        elem_tweettop = driver.find_element(By.XPATH, "//div[contains(@aria-label, 'タイムライン:')]")
         ids = []
         # ループさせながらスクロールして取得していく
         while True:
@@ -1989,7 +2022,7 @@ class ScrayTwitter(ScraypinIn):
 
 
 # 対象のIDのワードをチェックして要素ごとに得点と受けて保存する
-def CheckWordsTargetID(id):
+def CheckWordsTargetID(id, debug = False):
     NL = NLProcessing()
 
     keywords_P_hobby = {"ゲーム": 3, "スプラ": 3, "スマブラ": 3, "Apex": 6, "プレステ": 2, "スイッチ": 2, "Switch": 1, "格ゲー": 4, "アニメ": 5, "今期": 3, "リズムゲー": 2, "オタク": 2}
@@ -1999,13 +2032,13 @@ def CheckWordsTargetID(id):
     keywords_P_job = {"バイト": 3, "コス": 4, "コスプレ": 4, "配信": 2, "投稿": 2, "風俗": 5, "アイドル": 6, "地下": 5, "モデル": 4, "大学": 5, "学生": 3, "学校": 3, "教室": 3, "部活": 3, "試験": 3, "徹夜": 2, "進路": 2, "親友": 2, "友達": 2, "大会": 2, "下校": 3, "放課後": 4, "看護": 2, "ナース": 2, "サークル": 4, "成人式": 2, "ゲーマー": 6, "高校": 3}
     keywords_N_job = {"会社": 1, "営業": 1, "通勤": 3, "残業": 3, "公式": 30, "プレゼント": 30}
     keywords_P_loneli = {"イベント": 4, "出会い": 4, "夏コミ": 6, "サークル": 5, "コミケ": 6, "別れ": 3, "募": 8}
-    keywords_N_loneli = {"恋人": 1, "彼氏": 1, "子供": 4, "婚活": 8, "息子": 20}
+    keywords_N_loneli = {"恋人": 1, "彼氏": 1, "子供": 4, "婚活": 8, "息子": 20, "パートナー": 10, "婚": 10, "旦那": 30}
     keywords_P_home = {"名古屋": 8, "愛知": 5, "新宿": 3, "原宿": 3}
     keywords_N_home = {"九州": 5}
     keywords_P_mental = {"鬱": 3, "孤独": 4, "一人": 4, "誰か": 4, "死": 3, "氏": 3, "どうにか": 3}
     keywords_N_mental = {"パーティ": 6}
     NGWords = ["セフレ", "セクフレ", "糞", "結婚式"]
-    HomeNGWords = ["イラスト", "創設者", "原作者", "Illustrator", "児", "ママ", "代表", "子育て", "母", "運営", "作家", "社長", "カメコ", "Team", "子供", "息子", "夫", "結婚", "漫画家", "イラストレーター", "絵描き", "競馬", "公式アカウント", "阪神", "野球", "公式", "パチンコ", "パチスロ"]
+    HomeNGWords = ["育児", "イラスト", "創設者", "原作者", "Illustrator", "児", "ママ", "代表", "子育て", "母", "運営", "作家", "社長", "カメコ", "Team", "子供", "息子", "夫", "結婚", "漫画家", "イラストレーター", "絵描き", "競馬", "公式アカウント", "阪神", "野球", "公式", "パチンコ", "パチスロ"]
     # 指定したワード軍の中にPワードとNワードがいくつあるかチェックしてポイントをつけていく
     # mulによって倍率を操作できる
     def checkPN(ws, pws, nws, targetkey, mul = 1):
@@ -2014,7 +2047,7 @@ def CheckWordsTargetID(id):
         NegativeWords = nws
         for w in words:
             for k, v in PositiveWords.items():
-                if k in w[0]:
+                if k == w[0]:
                     lc = w[1] * v * mul
                     #
                     checkkey = targetkey + "_" + k
@@ -2023,7 +2056,7 @@ def CheckWordsTargetID(id):
                     else:
                         tid[checkkey] = lc
             for k, v in NegativeWords.items():
-                if k in w[0]:
+                if k == w[0]:
                     lc = w[1] * v * mul
                     #
                     checkkey = targetkey + "_" + k
@@ -2033,15 +2066,22 @@ def CheckWordsTargetID(id):
                         tid[checkkey] = -lc
 
     tid = {}
+    id = g.FixTwitterID(id)
     tid["ID"] = id
+    
     # ホーム情報の内容をチェックしてく
     hometws = g.LoadData(r"Users/" + id, "TwitterHome")
+
     if isinstance(hometws, list):
         homestr = ""
-        for k, v in tws[0].items():
+        for k, v in hometws[0].items():
             homestr += v
+            homestr += "\n"
         
-        words = NL.MakeMorphologicalAnalysis_MeCab(homestr)
+        words, kigous = NL.MakeMorphologicalAnalysis_MeCab(homestr)
+        if debug:
+            print("Home :" + str(words))
+            print(homestr)
 
         # 絶対的なNGワードがある場合はその時点で排除する
         for w in words:
@@ -2057,6 +2097,8 @@ def CheckWordsTargetID(id):
         checkPN(words, keywords_P_home, keywords_N_home, "home", 30)
         checkPN(words, keywords_P_mental, keywords_N_mental, "mental", 30)
 
+        #print(kigous)
+
     # ツイートの内容をチェックしていく
     tws = g.LoadData(r"Users/" + id, "Tweet")
     if isinstance(tws, list):
@@ -2066,10 +2108,12 @@ def CheckWordsTargetID(id):
         if twnum < 10:
             return
         for tw in tws:
-            t = tw["tweet"]
-            tweetstr += t
+            tweetstr += tw["tweet"]
+            tweetstr += "\n"
 
-        words = NL.MakeMorphologicalAnalysis_MeCab(tweetstr)
+        words, kigous = NL.MakeMorphologicalAnalysis_MeCab(tweetstr)
+        #if debug:
+            #print("Tweets :" + str(words))
 
         # ワードに得点とつけていく
         checkPN(words, keywords_P_sex, keywords_N_sex, "sex")
@@ -2078,39 +2122,55 @@ def CheckWordsTargetID(id):
         checkPN(words, keywords_P_loneli, keywords_N_loneli, "loneli")
         checkPN(words, keywords_P_home, keywords_N_home, "home")
         checkPN(words, keywords_P_mental, keywords_N_mental, "mental")
+
+        #print(kigous)
     
     # １つ１つファイル化しないとデータ量のせいか知らないが無効なデータ生まれる
     g.SaveData(tid, "damp", "WordPointData_" + id)
 
 if __name__ == '__main__':
-    if True:
+    #NL = NLProcessing()
+    #s = "⏰本日深夜0:59〜 放送！『熱闘！Mリーグ』に出演します！【麻雀初心者】の私に、Mリーグの魅力や楽しみ方をプレゼンしていただきました✨麻雀あんまり分からないよ〜っていう人も、見ればハマっちゃうかも…！"
+    #words, kigous = NL.MakeMorphologicalAnalysis_MeCab(s)
+    #print(words)
+    #print(kigous)
+    if False:
+        NL = NLProcessing()
+        s = "Illustrator"
+        words = NL.MakeMorphologicalAnalysis_MeCab(s)
+        print(words)
+
+    if False:
         files = glob.glob("/home/hikachof/デスクトップ/datas/Users/@*")
-        for fi in files:
+        fnum = len(files)
+        for i, fi in enumerate(files):
             id = fi.split("/")[-1]
-            #
+            print("CheckWords: " + id + " : " + str(i) + "/" + str(fnum))
             CheckWordsTargetID(id)
 
-            
+    #CheckWordsTargetID("kyame", False)
 
     if False:
         GT = ScrayTwitter()
         files = glob.glob("/home/hikachof/デスクトップ/datas/damp/WordPointData*")
-        targetid = g.LoadData("damp", "saveids")
+        #targetid = g.LoadData("damp", "saveids")
         okcount = 0
         saveids = []
-        print(targetid)
-        #for fi in files:
-        for ti in targetid:
+        
+        for fi in files:
             #
-            #fname = fi.split("/")[-1]
-            #fname = fname.split(".")[0]
-            
-            fname = "MeCab_" + ti
+            fname = fi.split("/")[-1]
+            fname = fname.split(".")[0]
 
             data = g.LoadData(r"damp", fname)
 
             if data:
                 data = data[0]
+                #print(data)
+
+                print("========================================================================")
+                print("========================================================================")
+                print(fname)
                     
                 # 対象のキーに関連したカウントの合計を得る
                 def checkkeycount(targetkey, border = 15):
@@ -2118,11 +2178,9 @@ if __name__ == '__main__':
                     for k, v in data.items():
                         if targetkey in k:
                             count += v
-                            print(k + " : " + str(v))
+                            print(k + " : " + str(v) + " : " + str(count))
                     return (count - border) > 0
-                #
-                id = fname.replace("MeCab_", "")
-                print(id)
+
                 if checkkeycount("sex", 15) and (checkkeycount("job", 10) or checkkeycount("hobby", 10)):
                     GT.driver.get(f"https://twitter.com/{data['ID']}")
                     okcount += 1
