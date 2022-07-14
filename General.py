@@ -46,9 +46,9 @@ def shape_data(data):
 
 
 # 適切なファイルパスとファイル名を作成する
-basefolder = r"\home\hikachof\デスクトップ\datas"
+basefolder = "/home/hikachof/デスクトップ/datas"
 def MakeFilePath(filepath, filename, fileEx):
-    filepath = basefolder + "\\" + filepath
+    filepath = basefolder + "/" + filepath
     # そこまでのフォルダーの作成を行う
     try:
         os.makedirs(filepath)

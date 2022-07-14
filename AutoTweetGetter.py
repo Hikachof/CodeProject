@@ -1,5 +1,5 @@
 #from asyncio.windows_events import None
-from distutils.log import error
+#from distutils.log import error
 from fileinput import filename
 #from datetime import date
 from gc import get_freeze_count
@@ -56,7 +56,7 @@ import atexit
 import copy
 import csv
 import gensim
-#import MeCab
+import MeCab
 
 import General as g
 
@@ -179,11 +179,37 @@ class NLProcessing:
         print(match)
 
     # 形態素解析１
-    def MakeMorphologicalAnalysis_KNP(self, txt):
-        jumanpp = Juman()
-        res = jumanpp.analysis(txt)
-        for mrph in res.mrph_list(): # 各形態素にアクセス
-            print("見出し:%s, 読み:%s, 原形:%s, 品詞:%s, 品詞細分類:%s, 活用型:%s, 活用形:%s, 意味情報:%s, 代表表記:%s" % (mrph.midasi, mrph.yomi, mrph.genkei, mrph.hinsi, mrph.bunrui, mrph.katuyou1, mrph.katuyou2, mrph.imis, mrph.repname))
+    def MakeMorphologicalAnalysis_Juman(self, txts):
+        jumanpp = Juman("jumanpp", None, 32000, 30)
+        #jumanpp.timeout = 3000
+        # 要素の出現頻度を計算する
+        word_freq = defaultdict(int)
+        for t in txts:
+            print(t)
+            t = t.replace("\n", "")
+            t = t.replace("\\", "")
+            result = jumanpp.analysis(t)
+            ress = []
+            for mrph in result.mrph_list(): # 各形態素にアクセス
+                #print("見出し:%s, 読み:%s, 原形:%s, 品詞:%s, 品詞細分類:%s, 活用型:%s, 活用形:%s, 意味情報:%s, 代表表記:%s" \
+                #        % (mrph.midasi, mrph.yomi, mrph.genkei, mrph.hinsi, mrph.bunrui, mrph.katuyou1, mrph.katuyou2, mrph.imis, mrph.repname))
+
+                surface = mrph.midasi
+                base = mrph.genkei
+                pos = mrph.hinsi
+                pos1 = mrph.bunrui
+                ress.append(dict(表層形=surface, 基本形=base, 品詞=pos, 品詞1=pos1))
+
+            #
+            for res in ress:
+                if res["品詞"] == '名詞':
+                    word_freq[res['基本形']] += 1
+
+        
+        sort_words = sorted(word_freq.items(), key=lambda x:x[1], reverse=True)
+        #for sw in sort_words:
+        #    print(sw)
+        return sort_words
 
     def MakeMorphologicalAnalysis_MeCab(self, txt):
         option0 = ''
@@ -208,7 +234,8 @@ class NLProcessing:
             pos1 = parts[1]
             base = parts[-3]
             #
-            ress.append(dict(表層形=surface, 基本形=base, 品詞=pos, 品詞1=pos1))
+            if base != "*":
+                ress.append(dict(表層形=surface, 基本形=base, 品詞=pos, 品詞1=pos1))
 
         #print(ress)
         # 要素の出現頻度を計算する
@@ -423,13 +450,13 @@ class ScrayTwitter(ScraypinIn):
         url = "https://twitter.com/i/flow/login"
         driver.get(url)
         
-        time.sleep(2)
+        time.sleep(4)
         input_mail = driver.find_element(By.TAG_NAME, "input")
         input_mail.clear()
         input_mail.send_keys(id)
         btn_enter = driver.find_element(By.XPATH, "/html/body/div/div/div/div[1]/div/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div/div/div/div[6]")
         btn_enter.click()
-        time.sleep(2)
+        time.sleep(3)
         # あなたはぼっとですかっていう簡単なチェック、出てこないこともあるので対応する
         try:
             input_username = driver.find_element(By.TAG_NAME, "input")
@@ -437,18 +464,18 @@ class ScrayTwitter(ScraypinIn):
             input_username.send_keys(id)
             btn_enter = driver.find_element(By.XPATH, "/html/body/div[1]/div/div/div[1]/div/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div[2]/div/div/div/div")
             btn_enter.click()
-            time.sleep(2)
+            time.sleep(3)
         except:
             pass
         #
         input_pass = driver.find_elements(By.TAG_NAME, "input")[1]
         input_pass.clear()
         input_pass.send_keys(pw)
-        time.sleep(2)
+        time.sleep(3)
         btn_enter = driver.find_element(By.XPATH, "/html/body/div[1]/div/div/div[1]/div/div/div/div/div/div/div[2]/div[2]/div/div/div[2]/div[2]/div[2]/div/div[1]/div/div")
         btn_enter.click()
         #
-        time.sleep(2)
+        time.sleep(3)
 
         self.bLogin = True
 
@@ -1230,7 +1257,7 @@ class ScrayTwitter(ScraypinIn):
 
         file_path = "Users/" + targetID
         file_name = "Following"
-        GT.SaveData(ids, file_path, file_name)
+        self.SaveData(ids, file_path, file_name)
               
         return ids
 
@@ -1961,112 +1988,156 @@ class ScrayTwitter(ScraypinIn):
             return False
 
 
+# 対象のIDのワードをチェックして要素ごとに得点と受けて保存する
+def CheckWordsTargetID(id):
+    NL = NLProcessing()
+
+    keywords_P_hobby = {"ゲーム": 3, "スプラ": 3, "スマブラ": 3, "Apex": 6, "プレステ": 2, "スイッチ": 2, "Switch": 1, "格ゲー": 4, "アニメ": 5, "今期": 3, "リズムゲー": 2, "オタク": 2}
+    keywords_N_hobby = {"BTS": 5}
+    keywords_P_sex = {"私": 3}
+    keywords_N_sex = {"俺": 20, "僕": 10, "男": 5}
+    keywords_P_job = {"バイト": 3, "コス": 4, "コスプレ": 4, "配信": 2, "投稿": 2, "風俗": 5, "アイドル": 6, "地下": 5, "モデル": 4, "大学": 5, "学生": 3, "学校": 3, "教室": 3, "部活": 3, "試験": 3, "徹夜": 2, "進路": 2, "親友": 2, "友達": 2, "大会": 2, "下校": 3, "放課後": 4, "看護": 2, "ナース": 2, "サークル": 4, "成人式": 2, "ゲーマー": 6, "高校": 3}
+    keywords_N_job = {"会社": 1, "営業": 1, "通勤": 3, "残業": 3, "公式": 30, "プレゼント": 30}
+    keywords_P_loneli = {"イベント": 4, "出会い": 4, "夏コミ": 6, "サークル": 5, "コミケ": 6, "別れ": 3, "募": 8}
+    keywords_N_loneli = {"恋人": 1, "彼氏": 1, "子供": 4, "婚活": 8, "息子": 20}
+    keywords_P_home = {"名古屋": 8, "愛知": 5, "新宿": 3, "原宿": 3}
+    keywords_N_home = {"九州": 5}
+    keywords_P_mental = {"鬱": 3, "孤独": 4, "一人": 4, "誰か": 4, "死": 3, "氏": 3, "どうにか": 3}
+    keywords_N_mental = {"パーティ": 6}
+    NGWords = ["セフレ", "セクフレ", "糞", "結婚式"]
+    HomeNGWords = ["イラスト", "創設者", "原作者", "Illustrator", "児", "ママ", "代表", "子育て", "母", "運営", "作家", "社長", "カメコ", "Team", "子供", "息子", "夫", "結婚", "漫画家", "イラストレーター", "絵描き", "競馬", "公式アカウント", "阪神", "野球", "公式", "パチンコ", "パチスロ"]
+    # 指定したワード軍の中にPワードとNワードがいくつあるかチェックしてポイントをつけていく
+    # mulによって倍率を操作できる
+    def checkPN(ws, pws, nws, targetkey, mul = 1):
+        # 一人称によって男女の判別を行う
+        PositiveWords = pws
+        NegativeWords = nws
+        for w in words:
+            for k, v in PositiveWords.items():
+                if k in w[0]:
+                    lc = w[1] * v * mul
+                    #
+                    checkkey = targetkey + "_" + k
+                    if checkkey in tid:
+                        tid[checkkey] += lc
+                    else:
+                        tid[checkkey] = lc
+            for k, v in NegativeWords.items():
+                if k in w[0]:
+                    lc = w[1] * v * mul
+                    #
+                    checkkey = targetkey + "_" + k
+                    if checkkey in tid:
+                        tid[checkkey] += -lc
+                    else:
+                        tid[checkkey] = -lc
+
+    tid = {}
+    tid["ID"] = id
+    # ホーム情報の内容をチェックしてく
+    hometws = g.LoadData(r"Users/" + id, "TwitterHome")
+    if isinstance(hometws, list):
+        homestr = ""
+        for k, v in tws[0].items():
+            homestr += v
+        
+        words = NL.MakeMorphologicalAnalysis_MeCab(homestr)
+
+        # 絶対的なNGワードがある場合はその時点で排除する
+        for w in words:
+            for ngw in HomeNGWords:
+                if ngw in w:
+                    return
+        
+        # ワードに得点とつけていく
+        checkPN(words, keywords_P_sex, keywords_N_sex, "sex", 30)
+        checkPN(words, keywords_P_job, keywords_N_job, "job", 30)
+        checkPN(words, keywords_P_hobby, keywords_N_hobby, "hobby", 30)
+        checkPN(words, keywords_P_loneli, keywords_N_loneli, "loneli", 30)
+        checkPN(words, keywords_P_home, keywords_N_home, "home", 30)
+        checkPN(words, keywords_P_mental, keywords_N_mental, "mental", 30)
+
+    # ツイートの内容をチェックしていく
+    tws = g.LoadData(r"Users/" + id, "Tweet")
+    if isinstance(tws, list):
+        tweetstr = ""
+        twnum = len(tws)
+        # ツイート数が少ないものも削除
+        if twnum < 10:
+            return
+        for tw in tws:
+            t = tw["tweet"]
+            tweetstr += t
+
+        words = NL.MakeMorphologicalAnalysis_MeCab(tweetstr)
+
+        # ワードに得点とつけていく
+        checkPN(words, keywords_P_sex, keywords_N_sex, "sex")
+        checkPN(words, keywords_P_job, keywords_N_job, "job")
+        checkPN(words, keywords_P_hobby, keywords_N_hobby, "hobby")
+        checkPN(words, keywords_P_loneli, keywords_N_loneli, "loneli")
+        checkPN(words, keywords_P_home, keywords_N_home, "home")
+        checkPN(words, keywords_P_mental, keywords_N_mental, "mental")
+    
+    # １つ１つファイル化しないとデータ量のせいか知らないが無効なデータ生まれる
+    g.SaveData(tid, "damp", "WordPointData_" + id)
 
 if __name__ == '__main__':
-    if False:
-        from pyknp import Juman
-        jumanpp = Juman()
-        result = jumanpp.analysis("すもももももももものうち")
-        for mrph in result.mrph_list(): # 各形態素にアクセス
-            print("見出し:%s, 読み:%s, 原形:%s, 品詞:%s, 品詞細分類:%s, 活用型:%s, 活用形:%s, 意味情報:%s, 代表表記:%s" \
-                    % (mrph.midasi, mrph.yomi, mrph.genkei, mrph.hinsi, mrph.bunrui, mrph.katuyou1, mrph.katuyou2, mrph.imis, mrph.repname))
-    #GT = ScrayTwitter()
-    #GT.GetTweet("@enako_cos", 30, 60, 0, True, True, False, False, "@enako_cos", None, True)
-    #GT.Quit()
-    if False:
-        NL = NLProcessing()
-        #print(NL.np_rate("メロスは激怒した。必ず、かの暴虐の王を覗かなければならぬと決意した"))
-        #wv = NL.GetNLModel_chiVe()
-        #words = wv.most_similar('職業', topn=10)
-        #print(wv.similarity('職業', 'モデル'))
-        
-        
-        keywords_P_hobby = ["ゲーム", "スプラ", "スマブラ", "Apex", "プレステ", "スイッチ", "Switch", "格ゲー", "アニメ", "今期", "リズムゲー", "オタク"]
-        keywords_N_hobby = ["BTS"]
-        keywords_P_sex = ["私"]
-        keywords_N_sex = ["俺", "僕"]
-        keywords_P_job = ["バイト", "コス", "コスプレ", "配信", "投稿", "風俗", "アイドル", "地下", "モデル", "大学", "学生", "学校", "教室", "部活", "試験", "徹夜", "進路", "親友", "友達", "大会", "下校", "放課後", "看護", "ナース", "サークル", "成人式", "ゲーマー", "高校"]
-        keywords_N_job = ["会社", "営業", "通勤", "残業"]
-        keywords_P_loneli = ["イベント", "出会い", "夏コミ", "サークル", "コミケ", "別れ", "募"]
-        keywords_N_loneli = ["恋人", "彼氏", "子供", "婚活"]
-        keywords_P_home = ["名古屋", "愛知", "新宿", "原宿"]
-        keywords_N_home = []
-        keywords_P_mental = ["鬱", "孤独", "一人", "誰か", "死", "氏", "どうにか"]
-        keywords_N_mental = ["たくさん", "パーティ"]
-        #NGWords = ["セフレ", "セクフレ"]
+    if True:
+        files = glob.glob("/home/hikachof/デスクトップ/datas/Users/@*")
+        for fi in files:
+            id = fi.split("/")[-1]
+            #
+            CheckWordsTargetID(id)
 
+            
 
-        if True:
-            files = glob.glob(r"C:\Users\hikac\Desktop\datas\Users\@*")
-            TargetIDs = []
-            for fi in files[:10]:
-                ws = []
-                id = fi.split("\\")[-1]
-                tws = g.LoadData(r"Users\\" + id, "TwitterHome")
-                if tws:
+    if False:
+        GT = ScrayTwitter()
+        files = glob.glob("/home/hikachof/デスクトップ/datas/damp/WordPointData*")
+        targetid = g.LoadData("damp", "saveids")
+        okcount = 0
+        saveids = []
+        print(targetid)
+        #for fi in files:
+        for ti in targetid:
+            #
+            #fname = fi.split("/")[-1]
+            #fname = fname.split(".")[0]
+            
+            fname = "MeCab_" + ti
+
+            data = g.LoadData(r"damp", fname)
+
+            if data:
+                data = data[0]
+                    
+                # 対象のキーに関連したカウントの合計を得る
+                def checkkeycount(targetkey, border = 15):
+                    count = 0
+                    for k, v in data.items():
+                        if targetkey in k:
+                            count += v
+                            print(k + " : " + str(v))
+                    return (count - border) > 0
+                #
+                id = fname.replace("MeCab_", "")
+                print(id)
+                if checkkeycount("sex", 15) and (checkkeycount("job", 10) or checkkeycount("hobby", 10)):
+                    GT.driver.get(f"https://twitter.com/{data['ID']}")
+                    okcount += 1
+                    print("OK: " + str(okcount))
                     try:
-                        th = tws[0]["overview"]
+                        val = input()
+                        if len(val) > 0:
+                            #print("Save: " + id)
+                            saveids.append(id)
                     except:
                         pass
-                    NL.MakeMorphologicalAnalysis_KNP(th)
-                    #print(id)
-                    #print(words)
-                    
-
-        if False:
-            files = glob.glob(r"C:\Users\hikac\Desktop\datas\Users\@*")
-            TargetIDs = []
-            #ids = ["@iorimoe_five", "@chanbaekkailu1", "@193iKkyu3", "@kokoro777pp", "@naomi_majima", "@mizuyuno_", "@saki_miyamoto", "@nashiko_cos"]
-            for fi in files:
-            #for id in ids:
-                ws = []
-                id = fi.split("\\")[-1]
-                tws = g.LoadData(r"Users\\" + id, "Tweet")
-                if isinstance(tws, list):                
-                    tweets = ""
-                    twnum = len(tws)
-                    # ツイート数が少ないものも削除
-                    if twnum < 100:
-                        continue
-                    for tw in tws:
-                        t = tw["tweet"]
-                        tweets += t
-                    words = NL.MakeMorphologicalAnalysis(tweets)
-
-                    if False:
-                        print(id + " : " + str(twnum))
-                        for w in words:
-                            if w[1] > 10:
-                                print(w)
-
-                    if True:
-                        # 一人称によって男女の判別を行う
-                        PositiveWords = keywords_josei
-                        NegativeWords = keywords_otoko
-                        TargetCount = 0
-                        for w in words:
-                            for ww in PositiveWords:
-                                if ww in w[0]:
-                                    TargetCount += w[1]
-                                    ws.append(w)
-                            for ww in NegativeWords:
-                                if ww in w[0]:
-                                    TargetCount -= w[1] * 20
-                                    ws.append(w)
-                        # 指定したワードを多く含むIDを取得する
-                        TargetIDs.append({"ID": id, "TargetCount": TargetCount, "Words": ws})
-            #
-            g.SaveData(TargetIDs, "damp", "TargetIDs")
-            print("TargetIDs :" + str(len(TargetIDs)))
-    if False:
-        datas = g.LoadData("damp", "TargetIDs")
-        GT = ScrayTwitter()
-        for data in datas:
-            if data["TargetCount"] > 15:
-                GT.driver.get(f"https://twitter.com/{data['ID']}")
-                print(data['Words'])
-                time.sleep(3)
+                    #time.sleep(3)
+        #g.SaveData(saveids, "damp", "saveids")
         GT.Quit()
+
 
     #tws = g.LoadData("Users\@enako_cos", "Tweet")
     #eds = []
