@@ -63,7 +63,10 @@ def SaveData(savedata, file_path, file_name):
     typecheck = savedata
     while True:
         if isinstance(typecheck, list):
-            typecheck = typecheck[0]
+            try:
+                typecheck = typecheck[0]
+            except:
+                return None
         else:
             break
     # jsonとして保存
@@ -320,3 +323,8 @@ def getFixDateTime(date):
     #print(d1 + "_" + d2 + "_" + d3 + "_" + t)
     date = d1 + "_" + d2 + "_" + d3 + "_" + t
     return date
+
+# TwitterのIDに対して＠マークをちゃんとつける
+def FixTwitterID(id):
+    id = id.replace("@", "")
+    return "@" + id
