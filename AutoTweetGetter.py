@@ -1231,7 +1231,7 @@ class ScrayTwitter(ScraypinIn):
         return ids
 
     # 指定したIDのリツイートの比率を取得する
-    def GetAcountForLike(self, targetID, tweetID):
+    def GetAcountForReTweetPercent(self, targetID):
         driver = self.driver
 
         url = "https://twitter.com/" + targetID
@@ -1239,23 +1239,62 @@ class ScrayTwitter(ScraypinIn):
         driver.get(url)
         time.sleep(1.2)
         #
+        WebDriverWait(driver, 10.0).until(EC.visibility_of_element_located((By.TAG_NAME, 'article')))
         elem_tweettop = driver.find_element(By.XPATH, "//div[contains(@aria-label, 'タイムライン:')]")
-        ids = []
-        # ループさせながらスクロールして取得していく
-        while True:
-            elems_like = elem_likes.find_elements(By.XPATH, ".//div[@dir='ltr']")
-            for elem_like in elems_like:
-                getid = elem_like.text
-                if not (getid in ids):
-                    ids.append(getid)
-            
-            if self.scroll_to_elem(elem_likes, By.XPATH, "./div/div[@data-testid='cellInnerDiv']"):
+        
+        retweetcount = 0.0
+        inretweetcount = 0.0
+        tweetcount = 0.0
+
+        # 
+        for i in range(10):
+            elems_article = elem_tweettop.find_elements(By.XPATH, ".//article")
+            for e in elems_article:
+                # 重複チェックを行う
+                try:
+                    elems_a = e.find_elements(By.TAG_NAME, "a")
+                    id = elems_a[3].get_attribute("href")
+                except:
+                    continue
+                if id in self.id_list:
+                    #print("重複")
+                    continue
+
+                # チェックスタート
+                self.id_list.append(id)
+                # リツイートチェック
+                try:
+                    elem_re = e.find_element(By.XPATH, ".//span[@data-testid='socialContext']")
+                    #print(elem_re.text)
+                    if "さんがリツイート" in elem_re.text:
+                        retweetcount += 1
+                        continue
+                except:
+                    pass
+                # 引用リツイートチェック
+                try:
+                    elems_re = e.find_elements(By.XPATH, ".//div[@dir='auto']")
+                    for re_e in elems_re:
+                        # 見えないテキストの取得！！！
+                        hide_text = re_e.get_attribute("textContent")
+                        if "引用ツイート" == hide_text:
+                            inretweetcount += 1
+                            continue
+                except:
+                    pass
+                # それ以外はツイートとする
+                tweetcount += 1
+
+
+            #
+            if self.scroll_to_elem(self.driver):
                 break
-            
             # 待つ（サイトに負荷を与えないと同時にコンテンツの読み込み待ち）
             time.sleep(self.scroll_wait_time)
               
-        return ids
+        # チェック結果を返す
+        self.Reset()
+        return (retweetcount + inretweetcount) / (retweetcount + inretweetcount + tweetcount)
 
     # 指定したアカウントのフォローしているアカウントを取得する
     def GetAcountForFollowing(self, targetID):
@@ -1494,6 +1533,14 @@ class ScrayTwitter(ScraypinIn):
             #    print(str(i) + ":" + s.text)
             homeData["name"] = elems_username_span[1].text
             homeData["id"] = elems_username_span[3].text
+            # 公式マークがついているかチェック
+            try:
+                #elem_username.find_element(By.XPATH, ".//svg[@aria-label='認証済みアカウント']")
+                elem_username.find_element(By.TAG_NAME, "svg")
+                homeData["official"] = True
+            except:
+                homeData["official"] = False
+                pass
             
             # divの個数がBannerによって変化するので対応している
             elem_home = driver.find_element(By.XPATH, "//nav[@aria-label='プロフィールタイムライン'][@role='navigation']")
@@ -1518,6 +1565,7 @@ class ScrayTwitter(ScraypinIn):
             elems_follow = elems_home_div[-2].find_elements(By.XPATH, "./div")
             homeData["follow"] = self.FixStrNumber(elems_follow[0].text.split()[0])
             homeData["follower"] = self.FixStrNumber(elems_follow[1].text.split()[0])
+            
             
             #
             #print(homeData)
@@ -2134,6 +2182,7 @@ if __name__ == '__main__':
     #words, kigous = NL.MakeMorphologicalAnalysis_MeCab(s)
     #print(words)
     #print(kigous)
+
     if False:
         NL = NLProcessing()
         s = "Illustrator"
