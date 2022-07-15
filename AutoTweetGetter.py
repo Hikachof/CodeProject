@@ -2183,6 +2183,12 @@ if __name__ == '__main__':
     #print(words)
     #print(kigous)
 
+    if True:
+        #files = 
+        id = "@enako_cos"
+        g.MakeImagePutTogether_ID(id, 25)
+        
+
     if False:
         NL = NLProcessing()
         s = "Illustrator"

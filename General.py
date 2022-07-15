@@ -10,6 +10,9 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 from urllib import request
+import cv2
+import math
+import glob
 
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -328,3 +331,68 @@ def getFixDateTime(date):
 def FixTwitterID(id):
     id = id.replace("@", "")
     return "@" + id
+
+
+# 指定したTwitterIDのImageをまとめたイメージを作成する
+def MakeImagePutTogether_ID(id, maximage = 100):
+    imagefiles = []
+    count = 0
+    # Banner and Icon
+    files = glob.glob(f"/home/hikachof/デスクトップ/datas/Users/{id}/*jpg")
+    for f in files:
+        count += 1
+        imagefiles.append(cv2.imread(f))
+        #imagefiles.append(count)
+    # Images
+    files = glob.glob(f"/home/hikachof/デスクトップ/datas/Users/{id}/Images/*jpg")
+    for f in files:
+        count += 1
+        imagefiles.append(cv2.imread(f))
+        #imagefiles.append(count)
+        if count >= maximage:
+            break
+
+    MakeImagePutTogether(imagefiles, maximage)
+
+# 指定した画像をすべて１つの画像データにする
+def MakeImagePutTogether(imagefiles, maximage = 100):
+    # 画像データを正方形にするための計算式？なんかネットで拾ったやつ
+    def vconcat_resize_min(im_list, interpolation=cv2.INTER_CUBIC):
+        w_min = min(im.shape[1] for im in im_list)
+        im_list_resize = [cv2.resize(im, (w_min, int(im.shape[0] * w_min / im.shape[1])), interpolation=interpolation)
+                        for im in im_list]
+        return cv2.vconcat(im_list_resize)
+    def hconcat_resize_min(im_list, interpolation=cv2.INTER_CUBIC):
+        h_min = min(im.shape[0] for im in im_list)
+        im_list_resize = [cv2.resize(im, (int(im.shape[1] * h_min / im.shape[0]), h_min), interpolation=interpolation)
+                        for im in im_list]
+        return cv2.hconcat(im_list_resize)
+    def concat_tile_resize(im_list_2d, interpolation=cv2.INTER_CUBIC):
+        im_list_v = [hconcat_resize_min(im_list_h, interpolation=cv2.INTER_CUBIC) for im_list_h in im_list_2d]
+        return vconcat_resize_min(im_list_v, interpolation=cv2.INTER_CUBIC)
+
+    # 
+    #print(len(imagefiles))
+    filenum = min(maximage, len(imagefiles))
+    if filenum > 4:
+        # 正方形に画像を並べるために画像総数のルート値を使用している
+        # 溢れた分は処理しないようにする
+        ruto = int(math.sqrt(filenum))
+
+        imrutofiles = []
+        for i in range(ruto):
+            a = i*ruto
+            b = (i+1)*ruto
+            imrutofiles.append(imagefiles[a:b])
+
+        # あぶれた分が少ない場合はそれも並べてやる
+        aburenum = filenum - (ruto*ruto)
+        if aburenum != 0 and aburenum < 12:
+            imrutofiles.append(imagefiles[ruto*ruto:])
+    else:
+        # 個数が少ない場合はそのまま横に並べてやる
+        imrutofiles = [imagefiles]
+        
+    #print(imrutofiles)
+    im_tile_resize = concat_tile_resize(imrutofiles)
+    cv2.imwrite('resize.jpg', im_tile_resize)
