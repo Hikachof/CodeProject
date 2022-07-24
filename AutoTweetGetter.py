@@ -73,9 +73,10 @@ re_kigou = "\u0020-\u002F\u003A-\u0040\u005B-\u0060\u007B-\u007E"
 re_num1 = "0-9"
 re_num2 = "０-９"
 re_alfa = "a-zA-Zａ-ｚＡ-Ｚ"
-re_http = "https?://[\w!\?/\+\-_~=;\.,\*&@#\$%\(\)'\[\]]+"
 re_kigou_a = "`|,|.|_|^|\＾|ﾉ|;|；|/|／|:|：|ゝ|*|ヾ|\"|Ｏ|\\\|+|＋|⁺|◟|·̫| |ᵒ̴̶̷̥́| | |.|｡ﾟ|+|.|-|`|、|◜|ω|◝| ᷇|࿀| ᷆| |*|´|◒|`|*|◉|‿|◉|٩|ˊ|ᗜ|ˋ|*|و|ง| |•̀|_|•́|ง|▽|°|:|3|ง| |•̀|_|•́|ง|▿|⁰|*|๑|╹|ω|∩|´|∀|｀|•́|︿|•̀|｡|³|ω|³|＠|・|o"
 re_kigou_b = "!|-|?|"
+re_all_http = "https?://[\w!\?/\+\-_~=;\.,\*&@#\$%\(\)'\[\]]+"
+re_all_mailaddress = "[\w\-._]+@[\w\-._]+\.[A-Za-z]+"
 
 
 CHROMEDRIVERPATH = "/usr/bin/chromedriver"
@@ -223,8 +224,6 @@ class NLProcessing:
         ress = []
         elements = parsed_txt.split("\n")[:-2]
         for element in elements:
-            #print(element)
-            #print(element)
             parts = element.split(",")
             surface_pos = parts[0].split("\t")
             try:
@@ -236,28 +235,34 @@ class NLProcessing:
             base = parts[-3]
             #
             if base != "*":
+                #if pos == "名詞" and pos1 == "固有名詞":
+                #    print(element)
                 ress.append(dict(表層形=surface, 基本形=base, 品詞=pos, 品詞1=pos1))
 
         #print(ress)
         # 要素の出現頻度を計算する
         word_freq = defaultdict(int)
         word_kigou = defaultdict(int)
+        word_keiyou = defaultdict(int)
 
         #
         for res in ress:
             #print(res)
-            if res["品詞"] == '名詞':
-                word_freq[res['基本形']] += 1
+            if res["品詞"] == '名詞' and res["品詞1"] == '固有名詞':
+                word_freq[res['表層形']] += 1
             if res["品詞"] == '記号':
-                word_kigou[res['基本形']] += 1
+                word_kigou[res['表層形']] += 1
+            if res["品詞"] == '名詞' and "形容動詞語幹" in res["品詞1"]:
+                word_keiyou[res['表層形']] += 1
 
         #print(word_freq)
         
         sort_freqs = sorted(word_freq.items(), key=lambda x:x[1], reverse=True)
         sort_kigous = sorted(word_kigou.items(), key=lambda x:x[1], reverse=True)
+        sort_keiyou = sorted(word_keiyou.items(), key=lambda x:x[1], reverse=True)
         #for sw in sort_words:
         #    print(sw)
-        return sort_freqs, sort_kigous
+        return sort_freqs, sort_kigous, sort_keiyou
         
     
 
@@ -333,15 +338,6 @@ class ScraypinIn:
         # タブを閉じる
         # driver.close()
         #self.Quit()
-
-    # ツイッターなどから取得できる簡略化された文字数字を数値に変換する
-    def FixStrNumber(self, stnum):
-        stnum = stnum.replace(",", "")
-        if "万" in stnum:
-            stnum = stnum.replace("万", "")
-            stnum = float(stnum) * 10000
-
-        return int(stnum)
 
 # Seleniumを用いたTwitterからの情報収集
 class ScrayTwitter(ScraypinIn):
@@ -847,7 +843,7 @@ class ScrayTwitter(ScraypinIn):
     def GetFixText(self, t):
         tokusyu = "、、＠"
         # URLの削除
-        t = re.sub(re_http, "、", t)
+        t = re.sub(re_all_http, "、", t)
         # 顔文字関連の削除
         #t = re.sub(r"\([^あ-ん\u30A1-\u30F4\u2E80-\u2FDF\u3005-\u3007\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\U00020000-\U0002EBEF]+?\)", ",", t)
         # そこから漏れてしまった不要な文字の削除
@@ -2068,11 +2064,66 @@ class ScrayTwitter(ScraypinIn):
             self.LastElemData = last_elem
             return False
 
+# 対象のTwitterHomeのワードを得る
+def GetWordForTwitterHome(id):
+    NL = NLProcessing()
+
+    # ホーム情報の内容をチェックしてく
+    hometws = g.LoadData(r"Users/" + id, "TwitterHome")
+    #print(hometws)
+    if isinstance(hometws, list):
+        homestr = ""
+        for k, v in hometws[0].items():
+            if k == "overview":
+                homestr += v
+                homestr += "\n"
+
+        # URLやアドレスなどの不要な情報を削除する
+        homestr = re.sub(f"{re_all_mailaddress}", "", homestr)
+        homestr = re.sub(f"{re_all_http}", "", homestr)
+        
+        words, kigous, keiyou = NL.MakeMorphologicalAnalysis_MeCab(homestr)
+        if debug:
+            print("Home :" + str(words))
+            print(homestr)
+
+        return words, kigous, keiyou
+
+# 対象のTweetのワードを得る
+# targetwordsによって特定のワードを含んでいるツイートに絞ることができる
+# 例えば、好きというワードに絞ると対象が好きであろうワードを得る可能性が高い
+def GetWordForTweet(id, targetwords):
+    NL = NLProcessing()
+
+    # ツイートの内容をチェックしていく
+    tws = g.LoadData(r"Users/" + id, "Tweet")
+    if isinstance(tws, list):
+        tweetstr = ""
+        twnum = len(tws)
+        # ツイート数が少ないものも削除
+        if twnum < 10:
+            return
+        for tw in tws:
+            t = tw["tweet"]
+            for tw in targetwords:
+                if tw in t:
+                    tweetstr += t
+                    tweetstr += "\n"
+                    break
+
+        # URLやアドレスなどの不要な情報を削除する
+        tweetstr = re.sub(f"{re_all_mailaddress}", "", tweetstr)
+        tweetstr = re.sub(f"{re_all_http}", "", tweetstr)
+
+        words, kigous, keiyou = NL.MakeMorphologicalAnalysis_MeCab(tweetstr)
+        if debug:
+            print("Tweets :" + str(words))
+
+        return words, kigous, keiyou
+
 
 # 対象のIDのワードをチェックして要素ごとに得点と受けて保存する
 def CheckWordsTargetID(id, debug = False):
-    NL = NLProcessing()
-
     keywords_P_hobby = {"ゲーム": 3, "スプラ": 3, "スマブラ": 3, "Apex": 6, "プレステ": 2, "スイッチ": 2, "Switch": 1, "格ゲー": 4, "アニメ": 5, "今期": 3, "リズムゲー": 2, "オタク": 2}
     keywords_N_hobby = {"BTS": 5}
     keywords_P_sex = {"私": 3}
@@ -2093,7 +2144,7 @@ def CheckWordsTargetID(id, debug = False):
         # 一人称によって男女の判別を行う
         PositiveWords = pws
         NegativeWords = nws
-        for w in words:
+        for w in ws:
             for k, v in PositiveWords.items():
                 if k == w[0]:
                     lc = w[1] * v * mul
@@ -2117,20 +2168,9 @@ def CheckWordsTargetID(id, debug = False):
     id = g.FixTwitterID(id)
     tid["ID"] = id
     
-    # ホーム情報の内容をチェックしてく
-    hometws = g.LoadData(r"Users/" + id, "TwitterHome")
-
-    if isinstance(hometws, list):
-        homestr = ""
-        for k, v in hometws[0].items():
-            homestr += v
-            homestr += "\n"
-        
-        words, kigous = NL.MakeMorphologicalAnalysis_MeCab(homestr)
-        if debug:
-            print("Home :" + str(words))
-            print(homestr)
-
+    # ホーム情報の内容をチェックしてく    
+    words, kigous = GetWordForTwitterHome(id)
+    if len(words) > 0:
         # 絶対的なNGワードがある場合はその時点で排除する
         for w in words:
             for ngw in HomeNGWords:
@@ -2148,21 +2188,8 @@ def CheckWordsTargetID(id, debug = False):
         #print(kigous)
 
     # ツイートの内容をチェックしていく
-    tws = g.LoadData(r"Users/" + id, "Tweet")
-    if isinstance(tws, list):
-        tweetstr = ""
-        twnum = len(tws)
-        # ツイート数が少ないものも削除
-        if twnum < 10:
-            return
-        for tw in tws:
-            tweetstr += tw["tweet"]
-            tweetstr += "\n"
-
-        words, kigous = NL.MakeMorphologicalAnalysis_MeCab(tweetstr)
-        #if debug:
-            #print("Tweets :" + str(words))
-
+    words, kigous = GetWordForTweet(id)
+    if len(words) > 0:
         # ワードに得点とつけていく
         checkPN(words, keywords_P_sex, keywords_N_sex, "sex")
         checkPN(words, keywords_P_job, keywords_N_job, "job")
@@ -2184,6 +2211,9 @@ if __name__ == '__main__':
     #print(kigous)
 
     if True:
+        g.ViewTweetOverview("enako_cos", "week")
+
+    if False:
         #files = 
         id = "@enako_cos"
         g.MakeImagePutTogether_ID(id, 25)
@@ -2203,7 +2233,12 @@ if __name__ == '__main__':
             print("CheckWords: " + id + " : " + str(i) + "/" + str(fnum))
             CheckWordsTargetID(id)
 
-    #CheckWordsTargetID("kyame", False)
+    if True:
+        #words, kigous = GetWordForTwitterHome("@enako_cos")
+        #words, kigous, keiyou = GetWordForTweet("@enako_cos")
+        #print(words)
+        #print(keiyou)
+        pass
 
     if False:
         GT = ScrayTwitter()
@@ -2250,16 +2285,3 @@ if __name__ == '__main__':
                     #time.sleep(3)
         #g.SaveData(saveids, "damp", "saveids")
         GT.Quit()
-
-
-    #tws = g.LoadData("Users\@enako_cos", "Tweet")
-    #eds = []
-    #for tw in tws:
-    #    eds.append(g.GetSimplificationDateTime(tw["datetime"])) 
-
-    #
-    #g.MakeGraph_date(eds, "year")
-    #g.MakeGraph_date(eds, "month")
-    #g.MakeGraph_date(eds, "week", "2019-2021")
-    #g.MakeGraph_date(eds, "week", "2019-2021", None, None, "22-5")
-    #g.MakeGraph_date(eds, "hour")

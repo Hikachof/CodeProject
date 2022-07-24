@@ -13,6 +13,8 @@ from urllib import request
 import cv2
 import math
 import glob
+from types import NoneType
+import random
 
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -89,6 +91,7 @@ def SaveData(savedata, file_path, file_name):
 # 単純にデータを読み込む
 def LoadData(file_path, file_name):
     filepath = MakeFilePath(file_path, file_name, "json")
+    #print(filepath)
     try:
         jo = open(filepath, "r", encoding="utf-8")
         return json.load(jo)
@@ -135,8 +138,9 @@ def GetDateTime(dt):
 
 # グラフの作成を行う
 # xs,ysには関連した値を配列として渡すと複数のグラフを同時に設定できる
-def MakeGraph(xs, ys, labels, title, xlabel, ylabel, size, filename):
-    colors = ["red", "#87ceeb", "yellow", "blue", "white", "black"]
+# xs2などにデータを入れることによって２つの軸のグラフを作成することができる
+def MakeGraph(xs, ys, labels, title, xlabel, ylabel, size, filename, ys2 = None, labels2 = None, ylabel2 = None):
+    colors = ["red", "#87ceeb", "blue", "black"]
 
     # それぞれの配列数は一致していなければいけないのでチェックする
     xsnum = len(xs)
@@ -145,18 +149,32 @@ def MakeGraph(xs, ys, labels, title, xlabel, ylabel, size, filename):
     if xsnum != ysnum or ysnum != lsnum:
         print("ERROR Match Graph")
         return
-    #
-    plt.figure(figsize=(size, size))
+    
+    
+    # plt.figure(figsize=(size, size))
+    fig, ax1 = plt.subplots(figsize=(size, size))
     for i,ls in enumerate(labels):
-        x = xs[i]
+        x = xs[0]
         y = ys[i]
         c = colors[i]
-        plt.plot(x, y, color=c, linewidth=3, linestyle="solid", marker="o", label=ls)
+        ax1.plot(x, y, color=c, linewidth=3, linestyle="solid", marker="o", label=ls)
+    #
+    if ys2 and labels2:
+        ax2 = ax1.twinx()
+        for i,ls in enumerate(labels2):
+            x = xs[0]
+            y = ys2[i]
+            print(y)
+            c = colors[len(labels) + i]
+            ax2.plot(x, y, color=c, linewidth=3, linestyle="solid", marker="x", label=ls)
+
     #
     plt.xticks(fontsize=size)
     plt.yticks(fontsize=size)
     plt.xlabel(xlabel, fontsize=size)
-    plt.ylabel(ylabel, fontsize=size)
+    ax1.set_ylabel(ylabel, fontsize=size)
+    if ylabel2:
+        ax2.set_ylabel(ylabel2, fontsize=size)
     plt.grid(axis="x")
     plt.title(title, fontsize=size)
     plt.legend(fontsize=size)
@@ -165,10 +183,12 @@ def MakeGraph(xs, ys, labels, title, xlabel, ylabel, size, filename):
     filepath = MakeFilePath("Graphs", filename, "png")
     plt.savefig(filepath)
 
+    return filepath
+
 # keydate : year / month / week / hour
 # targetによって指定範囲に絞ってデータを収集することが可能、例えばtargetweekを0とすれば、月曜日飲みを対象とすることができる
 # 他にもtargethourを "3-10" とすれば、3時から10時までの時間を対象としてデータを収集することができる。"22-3"というようにまたぐことも可能、また "3,10,22"というように複数指定することもできる
-def MakeGraph_date(dates, keydate, targetyear = None, targetmonth = None, targetweek = None, targethour = None):
+def MakeGraph_date(filename, dates, keydate, targetyear = None, targetmonth = None, targetweek = None, targethour = None):
 
     # 数値文字によってターゲットとなっている時間を返す
     def targetrange(target, minnum = None, maxnum = None):
@@ -219,7 +239,7 @@ def MakeGraph_date(dates, keydate, targetyear = None, targetmonth = None, target
     
     print(targets)
 
-    datecount = defaultdict(int)
+    datecount = {}
     for ed in dates:
         # 対象の時間をチェックする
         def checktarget(targetkey):
@@ -241,36 +261,59 @@ def MakeGraph_date(dates, keydate, targetyear = None, targetmonth = None, target
             continue
         if checktarget("hour"):
             continue
-        # 
-        datecount[str(ed[keydate])] += 1
+        # 対象のDateにおいて必要なデータを入れる
+        k = str(ed[keydate])
+        if k in datecount:
+            v = datecount[k]
+            v["tw"] += 1
+            v["like"] += ed["like"]
+            v["retweet"] += ed["retweet"]
+            v["reply"] += ed["reply"]
+            datecount[k] = v
+        else:
+            v = {}
+            v["tw"] = 1
+            v["like"] = ed["like"]
+            v["retweet"] = ed["retweet"]
+            v["reply"] = ed["reply"]
+            datecount[k] = v
 
     # Keyの数値の順に変更する
     datecount = sorted(datecount.items(), key=lambda x:int(x[0]), reverse=False)
     #print(datecount)
 
     xs = []
-    ys = []
+    ys_tw = []
+    ys_like = []
+    ys_retweet = []
+    ys_reply = []
 
     # Dateによってのツイートの偏りをグラフデータにする
     if keydate == "week":
         weekstr = ["月曜", "火曜", "水曜", "木曜", "金曜", "土曜", "日曜"]
         for yc in datecount:
             xs.append(weekstr[int(yc[0])])
-            ys.append(int(yc[1]))
+            ys_tw.append(int(yc[1]["tw"]))
+            ys_like.append(int(yc[1]["like"]))
+            ys_retweet.append(int(yc[1]["retweet"]))
+            ys_reply.append(int(yc[1]["reply"]))
     else:
         for yc in datecount:
             xs.append(int(yc[0]))
-            ys.append(int(yc[1]))
+            ys_tw.append(int(yc[1]["tw"]))
+            ys_like.append(int(yc[1]["like"]))
+            ys_retweet.append(int(yc[1]["retweet"]))
+            ys_reply.append(int(yc[1]["reply"]))
     #
     def makename(target):
         if isinstance(target, str):
             target = target.replace(",", "_")
         return ("_" + str(target) if target else "")
     name = keydate + makename(targetyear) + makename(targetmonth) + makename(targetweek) + makename(targethour)
-    MakeGraph([xs], [ys], [keydate], "Tweet on " + name, keydate, "Tweet Count", 10, "enako_cos_tweet_" + name)
+    return MakeGraph([xs], [ys_tw], [keydate], "Tweet on " + name, keydate, "Tweet Count", 10, filename + name, [ys_like, ys_retweet, ys_reply], ["LIKE", "RETWEET", "REPLY"], "BAZ Count")
 
 # Tweetなどの時間を必要な情報に変換して返す
-def GetSimplificationDateTime(date):
+def GetSimplificationDateTime(date, likecount, retweetcount, replycount):
     #print(date)
     # 必要な情報は西暦・月・曜日・時間の４つの情報を分けて収納する
     d, t = date.split("T")
@@ -285,9 +328,34 @@ def GetSimplificationDateTime(date):
     easydate["month"] = dt.month
     easydate["week"] = dt.weekday()
     easydate["hour"] = int(t1)
+    easydate["like"] = FixStrNumber(likecount)
+    easydate["retweet"] = FixStrNumber(retweetcount)
+    easydate["reply"] = FixStrNumber(replycount)
 
     return easydate
 
+# 指定した範囲のツイート情報を可視化する
+def ViewTweetOverview(id, keydate, targetyear = None, targetmonth = None, targetweek = None, targethour = None):
+    id = FixTwitterID(id)
+    # すでに情報を整理していた場合はそれを使用して短縮する
+    eds = None
+    #eds = LoadData(f"damp/{id}", f"TweetOverview_{id}")
+    if isinstance(eds, NoneType):
+        tws = LoadData(f"Users/{id}", "Tweet")
+        eds = []
+        for tw in tws:
+            eds.append(GetSimplificationDateTime(tw["datetime"], tw["likecount"], tw["retweetcount"], tw["replycount"])) 
+        #
+        SaveData(eds, f"damp/{id}", f"TweetOverview_{id}")
+
+    # グラフ画像の作成を行う
+    # 必要であればその画像までのPathを使用する
+    imagepath = MakeGraph_date(f"{id}_tweet_", eds, keydate, targetyear, targetmonth, targetweek, targethour)
+    # Ex.
+    #g.MakeGraph_date(eds, "month")
+    #g.MakeGraph_date(eds, "week", "2019-2021")
+    #g.MakeGraph_date(eds, "week", "2019-2021", None, None, "22-5")
+    #g.MakeGraph_date(eds, "hour")
 
 # Twitterから取得される日付文字列を最適化する
 def getFixDateTime(date):
@@ -332,6 +400,18 @@ def FixTwitterID(id):
     id = id.replace("@", "")
     return "@" + id
 
+# ツイッターなどから取得できる簡略化された文字数字を数値に変換する
+def FixStrNumber(stnum):
+    stnum = stnum.replace(",", "")
+    if "万" in stnum:
+        stnum = stnum.replace("万", "")
+        stnum = float(stnum) * 10000
+
+    try:
+        stnum = int(stnum)
+    except:
+        stnum = 0
+    return stnum
 
 # 指定したTwitterIDのImageをまとめたイメージを作成する
 def MakeImagePutTogether_ID(id, maximage = 100):
