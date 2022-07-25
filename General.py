@@ -140,7 +140,7 @@ def GetDateTime(dt):
 # xs,ysには関連した値を配列として渡すと複数のグラフを同時に設定できる
 # xs2などにデータを入れることによって２つの軸のグラフを作成することができる
 def MakeGraph(xs, ys, labels, title, xlabel, ylabel, size, filename, ys2 = None, labels2 = None, ylabel2 = None):
-    colors = ["red", "#87ceeb", "blue", "black"]
+    colors = ["b", "g", "c", "m", "y", "k"]
 
     # それぞれの配列数は一致していなければいけないのでチェックする
     xsnum = len(xs)
@@ -152,32 +152,36 @@ def MakeGraph(xs, ys, labels, title, xlabel, ylabel, size, filename, ys2 = None,
     
     
     # plt.figure(figsize=(size, size))
+    # ２軸に対応するためのsubplots
     fig, ax1 = plt.subplots(figsize=(size, size))
     for i,ls in enumerate(labels):
         x = xs[0]
         y = ys[i]
         c = colors[i]
-        ax1.plot(x, y, color=c, linewidth=3, linestyle="solid", marker="o", label=ls)
+        ax1.plot(x, y, color=c, linewidth=2, linestyle="solid", marker="o", label=ls)
     #
     if ys2 and labels2:
         ax2 = ax1.twinx()
         for i,ls in enumerate(labels2):
             x = xs[0]
             y = ys2[i]
-            print(y)
             c = colors[len(labels) + i]
-            ax2.plot(x, y, color=c, linewidth=3, linestyle="solid", marker="x", label=ls)
+            ax2.plot(x, y, color=c, linewidth=2, linestyle="dashed", marker="x", label=ls)
 
     #
     plt.xticks(fontsize=size)
     plt.yticks(fontsize=size)
     plt.xlabel(xlabel, fontsize=size)
     ax1.set_ylabel(ylabel, fontsize=size)
+    # 凡例の表示変更、これをしないと方っぽが表示されない
+    ax1.legend(bbox_to_anchor=(0, 1), loc='upper left', frameon=True, fontsize=size)
     if ylabel2:
         ax2.set_ylabel(ylabel2, fontsize=size)
+        # 凡例の表示変更、これをしないと方っぽが表示されない
+        ax2.legend(bbox_to_anchor=(1, 1), loc='upper right', borderaxespad=0, frameon=True, fontsize=size)
     plt.grid(axis="x")
     plt.title(title, fontsize=size)
-    plt.legend(fontsize=size)
+    #plt.legend(fontsize=size)
     #plt.ylim(-20, 20)
     #
     filepath = MakeFilePath("Graphs", filename, "png")
@@ -237,7 +241,7 @@ def MakeGraph_date(filename, dates, keydate, targetyear = None, targetmonth = No
     targets["hour"] = targetrange(targethour, 0, 23)
 
     
-    print(targets)
+    #print(targets)
 
     datecount = {}
     for ed in dates:
@@ -293,17 +297,19 @@ def MakeGraph_date(filename, dates, keydate, targetyear = None, targetmonth = No
         weekstr = ["月曜", "火曜", "水曜", "木曜", "金曜", "土曜", "日曜"]
         for yc in datecount:
             xs.append(weekstr[int(yc[0])])
-            ys_tw.append(int(yc[1]["tw"]))
-            ys_like.append(int(yc[1]["like"]))
-            ys_retweet.append(int(yc[1]["retweet"]))
-            ys_reply.append(int(yc[1]["reply"]))
+            twcount = int(yc[1]["tw"])
+            ys_tw.append(twcount)
+            ys_like.append(int(yc[1]["like"]/twcount))
+            ys_retweet.append(int(yc[1]["retweet"]/twcount))
+            ys_reply.append(int(yc[1]["reply"]/twcount))
     else:
         for yc in datecount:
             xs.append(int(yc[0]))
-            ys_tw.append(int(yc[1]["tw"]))
-            ys_like.append(int(yc[1]["like"]))
-            ys_retweet.append(int(yc[1]["retweet"]))
-            ys_reply.append(int(yc[1]["reply"]))
+            twcount = int(yc[1]["tw"])
+            ys_tw.append(twcount)
+            ys_like.append(int(yc[1]["like"]/twcount))
+            ys_retweet.append(int(yc[1]["retweet"]/twcount))
+            ys_reply.append(int(yc[1]["reply"]/twcount))
     #
     def makename(target):
         if isinstance(target, str):
@@ -339,7 +345,7 @@ def ViewTweetOverview(id, keydate, targetyear = None, targetmonth = None, target
     id = FixTwitterID(id)
     # すでに情報を整理していた場合はそれを使用して短縮する
     eds = None
-    #eds = LoadData(f"damp/{id}", f"TweetOverview_{id}")
+    eds = LoadData(f"damp/{id}", f"TweetOverview_{id}")
     if isinstance(eds, NoneType):
         tws = LoadData(f"Users/{id}", "Tweet")
         eds = []

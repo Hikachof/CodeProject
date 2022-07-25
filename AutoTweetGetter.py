@@ -2064,6 +2064,22 @@ class ScrayTwitter(ScraypinIn):
             self.LastElemData = last_elem
             return False
 
+# 対象の関連しているURLを得る
+def GetUserLinks(id):
+    # ホーム情報の内容をチェックしてく
+    hometws = g.LoadData(r"Users/" + id, "TwitterHome")
+
+    if isinstance(hometws, list):
+        urls = []
+        for k, v in hometws[0].items():
+            if k == "UserUrl":
+                urls.append(v)
+            elif k == "overview":
+                v = re.findall(f"{re_all_http}", v)
+                urls += v
+
+        return urls
+
 # 対象のTwitterHomeのワードを得る
 def GetWordForTwitterHome(id):
     NL = NLProcessing()
@@ -2211,6 +2227,10 @@ if __name__ == '__main__':
     #print(kigous)
 
     if True:
+        links = GetUserLinks("enako_cos")
+        print(links)
+
+    if False:
         g.ViewTweetOverview("enako_cos", "week")
 
     if False:
